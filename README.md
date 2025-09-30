@@ -23,9 +23,12 @@ Notes:
 #### Mod Manager (mklink) — Menu
 
 ========================================
+   1. Settings
+   2. Mods (list & toggle)
+   3. Presets (save/apply/toggle/delete)
+   4. Open mods SOURCE folder
+   5. Open GAME mods folder
+   6. Fix broken links (remove dead ones)
+   7. Exit
 
-1. Settings
-2. Mods (list & toggle)
-3. Presets (save/apply/toggle/delete)
-4. Exit
-   Select [0-3]:
+Select [1-7]:
