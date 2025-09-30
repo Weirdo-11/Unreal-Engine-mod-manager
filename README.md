@@ -18,7 +18,7 @@ Notes:
 -   On Windows, creating symlinks may require Administrator rights or Developer Mode. Junctions (/J) for directories usually don’t.
 -   Link names in game dir match source file/folder names.
 
-## Example
+## Text UI
 
 #### Mod Manager (mklink) — Menu
 
@@ -32,3 +32,4 @@ Notes:
    7. Exit
 
 Select [1-7]:
+
