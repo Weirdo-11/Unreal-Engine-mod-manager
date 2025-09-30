@@ -256,6 +256,24 @@ def print_pager(pages: int, current: int):
         labels.append(f"[p{i}]" if i != current else f"(p{i})")
     print("Pages:", " ".join(labels))
 
+# ---- Open Folders ----
+
+def open_folder(path_str: str) -> Tuple[bool, str]:
+    try:
+        if not path_str:
+            return False, "Path is empty"
+        p = Path(path_str).expanduser()
+        p.mkdir(parents=True, exist_ok=True)
+        if is_windows():
+            os.startfile(str(p))  # type: ignore[attr-defined]
+        elif platform.system() == "Darwin":
+            subprocess.Popen(["open", str(p)])
+        else:
+            subprocess.Popen(["xdg-open", str(p)])
+        return True, "Opened"
+    except Exception as e:
+        return False, str(e)
+
 # ----------------------------- Menus -----------------------------
 
 def menu_settings(cfg: Dict):
@@ -413,8 +431,10 @@ def main_menu():
         print("1) Settings")
         print("2) Mods (list & toggle)")
         print("3) Presets (save/apply/toggle/delete)")
+        print("4) Open mods SOURCE folder")
+        print("5) Open GAME mods folder")
         print("0) Exit")
-        choice = prompt("Select [0-3]: ").strip()
+        choice = prompt("Select [0-5]: ").strip()
         if choice == "1":
             menu_settings(cfg)
             cfg = load_config()
@@ -422,6 +442,14 @@ def main_menu():
             menu_mods_toggle(cfg)
         elif choice == "3":
             menu_presets(cfg)
+        elif choice == "4":
+            ms = load_config().get("mods_source_dir", "")
+            ok, msg = open_folder(ms)
+            print(f"Open source folder: {'OK' if ok else 'ERR'} — {msg}")
+        elif choice == "5":
+            gs = load_config().get("game_mods_dir", "")
+            ok, msg = open_folder(gs)
+            print(f"Open game folder: {'OK' if ok else 'ERR'} — {msg}")
         elif choice == "0":
             print("Goodbye!")
             return
