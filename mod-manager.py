@@ -135,6 +135,11 @@ def list_installed_mods(cfg: Dict) -> List[ModItem]:
     items = discover_mods(cfg)
     return [m for m in items if m.installed]
 
+def list_broken_links(cfg: Dict) -> List[ModItem]:
+    """Links exist in game dir but source file/folder is missing."""
+    items = discover_mods(cfg)
+    return [m for m in items if m.installed and not m.src.exists()]
+
 def apply_mod(mod: ModItem) -> Tuple[bool, str]:
     return mklink(mod.src, mod.dest)
 
@@ -273,6 +278,47 @@ def open_folder(path_str: str) -> Tuple[bool, str]:
         return True, "Opened"
     except Exception as e:
         return False, str(e)
+
+# ---- Fix Broken Links ----
+
+def menu_fix_broken(cfg: Dict):
+    if not ensure_paths(cfg):
+        return
+    broken = list_broken_links(cfg)
+    page = 1
+    while True:
+        os.system("cls" if is_windows() else "clear")
+        broken = list_broken_links(cfg)
+        if not broken:
+            print("No broken links detected.")
+            return
+        page, pages = paginate(len(broken), page)
+        shown = page_slice(broken, page)
+        print("Fix broken links — remove game links whose source is missing")
+        print("=" * 40)
+        for i, m in enumerate(shown, 1):
+            kind = "DIR" if m.is_dir else "FILE"
+            print(f"{i:2d}) [!] {m.name} ({kind})  -> missing source: {m.src}")
+        print_pager(pages, page)
+        print("0) Back  |  pN to change page  |  a) Remove ALL on page  |  numbers (comma-separated) to remove selected")
+        choice = prompt("> ").strip().lower()
+        if choice == "0":
+            return
+        if choice == "a":
+            for m in shown:
+                deactivate_mod(m)
+            print("Removed all broken links on this page.")
+            continue
+        page_sel = parse_page_choice(choice)
+        if page_sel:
+            page = page_sel
+            continue
+        nums = parse_multi_choice(choice)
+        for num in nums:
+            if 1 <= num <= len(shown):
+                m = shown[num - 1]
+                ok, msg = deactivate_mod(m)
+                print(f"Remove {m.dest.name}: {'OK' if ok else 'ERR'} — {msg}")
 
 # ----------------------------- Menus -----------------------------
 
@@ -433,8 +479,9 @@ def main_menu():
         print("3) Presets (save/apply/toggle/delete)")
         print("4) Open mods SOURCE folder")
         print("5) Open GAME mods folder")
+        print("6) Fix broken links (remove dead ones)")
         print("0) Exit")
-        choice = prompt("Select [0-5]: ").strip()
+        choice = prompt("Select [0-6]: ").strip()
         if choice == "1":
             menu_settings(cfg)
             cfg = load_config()
@@ -450,6 +497,8 @@ def main_menu():
             gs = load_config().get("game_mods_dir", "")
             ok, msg = open_folder(gs)
             print(f"Open game folder: {'OK' if ok else 'ERR'} — {msg}")
+        elif choice == "6":
+            menu_fix_broken(cfg)
         elif choice == "0":
             print("Goodbye!")
             return
