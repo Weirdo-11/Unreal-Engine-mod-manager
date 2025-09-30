@@ -1,7 +1,5 @@
 # Unreal Engine Console Mod-Manager (Python)
 
-**Mod Manager (Windows-first)** — простий текстовий інтерфейс для управління модами.
-
 ---
 
 ## ✨ Features
@@ -54,3 +52,4 @@ Mod Manager (mklink) — Menu
 0. Exit
 
 Select [0-6]:
+
