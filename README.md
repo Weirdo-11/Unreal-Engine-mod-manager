@@ -17,7 +17,8 @@
 - 🔄 **Mod Operations**  
   - Apply / deactivate mods (create/remove links in game dir)  
   - Single **mods menu**:  
-    - List & toggle (install/uninstall)  
+    - List & toggle (install/uninstall)
+    - Search by name
     - Pagination (20 items per page: `p1`, `p2`, …)  
     - Multi-select via comma-separated indices  
 - 📂 **Presets in JSON**  
@@ -43,13 +44,13 @@
 ```text
 Mod Manager (mklink) — Menu
 ========================================
-1. Settings
-2. Mods (list & toggle)
-3. Presets (save/apply/toggle/delete)
-4. Open mods SOURCE folder
-5. Open GAME mods folder
-6. Fix broken links (remove dead ones)
-0. Exit
-
+1) ⚙️ Settings
+2) 🔄 Mods (list & toggle)
+3) 🗃️ Presets (save/apply/toggle/delete)
+4) 📋 Open mods SOURCE folder
+5) 📂 Open GAME mods folder
+6) 🛠️ Fix broken links (remove dead ones)
+0) 🏠 Exit
 Select [0-6]:
+
 
