@@ -136,7 +136,6 @@ def list_installed_mods(cfg: Dict) -> List[ModItem]:
     return [m for m in items if m.installed]
 
 def list_broken_links(cfg: Dict) -> List[ModItem]:
-    """Links exist in game dir but source file/folder is missing."""
     items = discover_mods(cfg)
     return [m for m in items if m.installed and not m.src.exists()]
 
@@ -330,7 +329,7 @@ def menu_settings(cfg: Dict):
         print(f"1) Game mods folder: {cfg.get('game_mods_dir') or '-not set-'}")
         print(f"2) Mods source folder: {cfg.get('mods_source_dir') or '-not set-'}")
         print(f"3) Mod file extensions: {cfg.get('mod_extensions') or '(all)'}")
-        print("4) Save and back")
+        print("0) Save and back\n")
         choice = prompt("Select [1-4]: ").strip()
         if choice == "1":
             p = prompt("Enter full path to game mods folder: ").strip().strip('"')
@@ -341,37 +340,79 @@ def menu_settings(cfg: Dict):
         elif choice == "3":
             p = prompt("Enter extensions (comma-separated) or leave empty for all: ").strip()
             cfg["mod_extensions"] = p
-        elif choice == "4":
+        elif choice == "0":
             save_config(cfg)
             print("Saved.")
             return
 
-# Unified mods list & toggle (install/uninstall)
+def filter_items_by_query(items: List[ModItem], query: str) -> List[ModItem]:
+    q = (query or "").lower()
+    if not q:
+        return items
+    return [m for m in items if q in m.name.lower()]
+
+# Unified mods list & toggle (install/uninstall) with search
 
 def menu_mods_toggle(cfg: Dict):
     if not ensure_paths(cfg):
         return
     page = 1
+    search_query = ""
     while True:
         os.system("cls" if is_windows() else "clear")
-        items = discover_mods(cfg)
+        items_all = discover_mods(cfg)
+        items = filter_items_by_query(items_all, search_query)
         if not items:
-            print("No mods found in source folder.")
-            return
+            print("Mods — install/uninstall (toggle)")
+            print("=" * 40)
+            print(f"Filter: '{search_query}' (no matches)")
+            print("\nCommands:")
+            print("  - f <text>: (filter)")
+            print("  - clear: (clear filter)")
+            print("  - 0: Back")
+            choice = prompt("> ").strip()
+            if choice == "0":
+                return
+            low = choice.lower()
+            if low == "clear":
+                search_query = ""
+                continue
+            if low.startswith("f ") or low.startswith("find "):
+                search_query = choice.split(" ", 1)[1].strip()
+                page = 1
+                continue
+            # anything else just continue
+            continue
         page, pages = paginate(len(items), page)
         shown = page_slice(items, page)
         print("Mods — install/uninstall (toggle)")
         print("=" * 40)
+        if search_query:
+            print(f"Filter: '{search_query}'")
         for i, m in enumerate(shown, 1):
             mark = "[X]" if m.installed else "[ ]"
             kind = "DIR" if m.is_dir else "FILE"
             print(f"{i:2d}) {mark} {m.name} ({kind})")
+        print("\n")
         print_pager(pages, page)
-        print("0) Back  |  pN to change page  |  Comma-separated numbers to toggle  |  a) Uninstall ALL (current page)")
-        choice = prompt("> ").strip().lower()
+        print("Commands:")
+        print("  - f: <text> (search) | clear: (clear search filter)")
+        print("  - numbers (comma-separated): toggle selected")
+        print("  - a: Uninstall ALL (current page)")
+        print("  - pN: go to page N   |   0: back")
+        choice = prompt("> ").strip()
         if choice == "0":
             return
-        if choice == "a":
+        low = choice.lower()
+        if low == "clear":
+            search_query = ""
+            page = 1
+            continue
+        if low.startswith("f ") or low.startswith("find "):
+            search_query = choice.split(" ", 1)[1].strip()
+            page = 1
+            continue
+        if low == "a":
             for m in shown:
                 if m.installed:
                     deactivate_mod(m)
@@ -416,6 +457,7 @@ def menu_presets(cfg: Dict):
             all_on = bool(mods) and all(nm in installed_set for nm in mods)
             mark = "[X]" if all_on else "[ ]"
             print(f"{i:2d}) {mark} {key}  — {len(mods)} mods")
+        print("\n")
         print_pager(pages, page)
         print("Commands:")
         print("  - numbers (comma-separated): toggle selected preset(s)")
