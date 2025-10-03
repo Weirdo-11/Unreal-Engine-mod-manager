@@ -432,7 +432,7 @@ def menu_mods_toggle(cfg: Dict):
             page = 1
             continue
         if low == "a":
-            for m in shown:
+            for idx, m in enumerate(shown, start=1):
                 if m.installed:
                     print(f"[{idx}/{len(shown)}] Uninstalling {m.name} ...")
                     deactivate_mod(m)
