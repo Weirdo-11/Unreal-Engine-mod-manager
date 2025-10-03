@@ -171,25 +171,43 @@ def delete_presets_by_names(names: List[str]) -> Tuple[int, List[str]]:
 
 def apply_preset(cfg: Dict, name: str) -> Tuple[int, int, List[str]]:
     presets = load_presets()
-    mods = {m.name: m for m in discover_mods(cfg)}
+    all_mods = {m.name: m for m in discover_mods(cfg)}
     names = presets.get(name, [])
+
     ok = 0
-    fail = 0
-    msgs = []
+    err = 0
+    msgs: List[str] = []
+
+    work: List[ModItem] = []
+    skipped_missing: List[str] = []
     for nm in names:
-        m = mods.get(nm)
+        m = all_mods.get(nm)
         if not m:
+            skipped_missing.append(nm)
+            continue
+        if not m.installed:
+            work.append(m)
+
+    total = len(work)
+    if skipped_missing:
+        for nm in skipped_missing:
             msgs.append(f"Skipped: {nm} (not in source)")
-            continue
-        if m.installed:
-            continue
-        success, msg = apply_mod(m)
+
+    if total == 0:
+        msgs.append("Nothing to install (all present or missing).")
+        return ok, err, msgs
+
+    for idx, mod in enumerate(work, start=1):
+        print(f"[{idx}/{total}] Installing {mod.name} ...")
+        success, msg = apply_mod(mod)
         if success:
             ok += 1
         else:
-            fail += 1
-        msgs.append(f"{nm}: {'OK' if success else 'ERR'} ({msg})")
-    return ok, fail, msgs
+            err += 1
+        msgs.append(f"{mod.name}: {'OK' if success else 'ERR'} ({msg})")
+
+    print(f"Done: installed {ok}/{total}. Errors: {err}.")
+    return ok, err, msgs
 
 def deactivate_preset(cfg: Dict, name: str) -> Tuple[int, int, List[str]]:
     presets = load_presets()
@@ -399,6 +417,7 @@ def menu_mods_toggle(cfg: Dict):
         print("  - f: <text> (search) | clear: (clear search filter)")
         print("  - numbers (comma-separated): toggle selected")
         print("  - a: Uninstall ALL (current page)")
+        print("  - i: Install ALL (current page)")
         print("  - pN: go to page N   |   0: back")
         choice = prompt("> ").strip()
         if choice == "0":
@@ -415,8 +434,17 @@ def menu_mods_toggle(cfg: Dict):
         if low == "a":
             for m in shown:
                 if m.installed:
+                    print(f"[{idx}/{len(shown)}] Uninstalling {m.name} ...")
                     deactivate_mod(m)
             print("All on this page uninstalled.")
+            continue
+        if low == "i":
+            to_install = [m for m in shown if not m.installed]
+            total = len(to_install)
+            for idx, m in enumerate(to_install, start=1):
+                print(f"[{idx}/{total}] Installing {m.name} ...")
+                apply_mod(m)
+            print(f"Installed {len(to_install)}/{total} on this page.")
             continue
         page_sel = parse_page_choice(choice)
         if page_sel:
