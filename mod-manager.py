@@ -16,6 +16,8 @@ PRESETS_PATH = APP_DIR / "presets.json"
 
 PAGE_SIZE = 20
 
+PRINT_SIZE = 48
+
 DEFAULT_CONFIG = {
     "mods_source_dir": "",
     "game_mods_dir": "",
@@ -312,7 +314,7 @@ def menu_fix_broken(cfg: Dict):
         page, pages = paginate(len(broken), page)
         shown = page_slice(broken, page)
         print("Fix broken links — remove game links whose source is missing")
-        print("=" * 40)
+        print("=" * PRINT_SIZE)
         for i, m in enumerate(shown, 1):
             kind = "DIR" if m.is_dir else "FILE"
             print(f"{i:2d}) [!] {m.name} ({kind})  -> missing source: {m.src}")
@@ -343,12 +345,12 @@ def menu_settings(cfg: Dict):
     while True:
         os.system("cls" if is_windows() else "clear")
         print("Settings")
-        print("=" * 40)
+        print("=" * PRINT_SIZE)
         print(f"1) Game mods folder: {cfg.get('game_mods_dir') or '-not set-'}")
         print(f"2) Mods source folder: {cfg.get('mods_source_dir') or '-not set-'}")
         print(f"3) Mod file extensions: {cfg.get('mod_extensions') or '(all)'}")
-        print("0) Save and back\n")
-        choice = prompt("Select [1-4]: ").strip()
+        print("\n0) Save and back\n")
+        choice = prompt("Select [0-3]: ").strip()
         if choice == "1":
             p = prompt("Enter full path to game mods folder: ").strip().strip('"')
             cfg["game_mods_dir"] = str(Path(p).expanduser()) if p else cfg.get("game_mods_dir", "")
@@ -382,7 +384,7 @@ def menu_mods_toggle(cfg: Dict):
         items = filter_items_by_query(items_all, search_query)
         if not items:
             print("Mods — install/uninstall (toggle)")
-            print("=" * 40)
+            print("=" * PRINT_SIZE)
             print(f"Filter: '{search_query}' (no matches)")
             print("\nCommands:")
             print("  - f <text>: (filter)")
@@ -404,7 +406,7 @@ def menu_mods_toggle(cfg: Dict):
         page, pages = paginate(len(items), page)
         shown = page_slice(items, page)
         print("Mods — install/uninstall (toggle)")
-        print("=" * 40)
+        print("=" * PRINT_SIZE)
         if search_query:
             print(f"Filter: '{search_query}'")
         for i, m in enumerate(shown, 1):
@@ -479,7 +481,7 @@ def menu_presets(cfg: Dict):
         items = discover_mods(cfg)
         installed_set = {m.name for m in items if m.installed}
         print("Presets — save/apply(toggle)/delete")
-        print("=" * 40)
+        print("=" * PRINT_SIZE)
         for i, key in enumerate(page_keys, 1):
             mods = presets[key]
             all_on = bool(mods) and all(nm in installed_set for nm in mods)
@@ -542,14 +544,14 @@ def main_menu():
     cfg = load_config()
     while True:
         os.system("cls" if is_windows() else "clear")
-        print("Mod Manager (mklink) — Menu")
-        print("=" * 40)
+        print("Mod Manager — Menu")
+        print("=" * PRINT_SIZE)
         print("1) ⚙️ Settings")
-        print("2) 🔄 Mods (list & toggle)")
-        print("3) 🗃️ Presets (save/apply/toggle/delete)")
-        print("4) 📋 Open mods SOURCE folder")
-        print("5) 📂 Open GAME mods folder")
-        print("6) 🛠️ Fix broken links (remove dead ones)")
+        print("2) 🔄 Mods    - list, toggle, search")
+        print("3) 🗃️ Presets - save,  apply, toggle, delete")
+        print("4) 📋 Open mods source folder")
+        print("5) 📂 Open game mods folder")
+        print("6) 🛠️ Fix missing mods")
         print("0) 🏠 Exit")
         choice = prompt("Select [0-6]: ").strip()
         if choice == "1":
