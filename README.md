@@ -39,6 +39,14 @@
 
 ---
 
+## ▶️ Run
+
+```
+python .\mod-manager.py
+```
+
+---
+
 ## 🖥️ Text UI Preview
 
 ```text
@@ -52,5 +60,6 @@ Mod Manager (mklink) — Menu
 6) 🛠️ Fix broken links (remove dead ones)
 0) 🏠 Exit
 Select [0-6]:
+
 
 
