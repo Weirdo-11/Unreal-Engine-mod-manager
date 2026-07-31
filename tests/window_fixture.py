@@ -57,6 +57,7 @@ class WindowTestCase(unittest.TestCase):
             patch("mod_manager.ui.app.mod_image_path", return_value=None),
             patch("mod_manager.ui.app.mods_view", return_value=(self.mods, self.mods, 1, 1, {"combat.pak": "combat"})),
             patch("mod_manager.ui.app.mods_records", return_value={"combat.pak": {"last_managed": "2026-01-01 10:00:00"}}),
+            patch("mod_manager.ui.app.load_favorites", return_value=set()),
             patch("mod_manager.ui.app.presets_view", return_value=(self.presets, list(self.presets), ["core", "ui"], 1, 1)),
             patch("mod_manager.ui.app.presets_records", return_value={"core": {"last_managed": "2026-01-02 10:00:00"}}),
             patch("mod_manager.ui.app.list_installed_mods", return_value=[self.mods[0]]),

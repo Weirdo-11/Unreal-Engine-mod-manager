@@ -198,6 +198,43 @@ class CliRequestTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("Invalid index.", output)
 
+    def test_favorite_filter_and_actions_use_the_combined_view(self):
+        shown = [self.mod_item("favorite.pak")]
+
+        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
+            "mod_manager.cli.mods_view",
+            return_value=(shown, shown, 1, 1, {"favorite.pak": "combat"}),
+        ) as mods_view, patch(
+            "mod_manager.cli.add_favorites_to_mods",
+            return_value="Favorites added: favorite.pak",
+        ) as add_favorites:
+            code, output = self.run_request(
+                [
+                    "mods",
+                    "favorite-add",
+                    "1",
+                    "--filter-label",
+                    "combat",
+                    "--search",
+                    "pak",
+                    "--favorite",
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        mods_view.assert_called_once_with(self.cfg, 1, "combat", "pak", "default", True)
+        add_favorites.assert_called_once_with(self.cfg, ["favorite.pak"])
+        self.assertIn("Favorites added: favorite.pak", output)
+
+    def test_install_favorite_filter_reaches_page_operation(self):
+        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
+            "mod_manager.cli.apply_mods_page", return_value=(1, 1, 0)
+        ) as apply_mods:
+            code, _output = self.run_request(["mods", "install", "--favorite"])
+
+        self.assertEqual(code, 0)
+        apply_mods.assert_called_once_with(self.cfg, 1, "", "", "default", True)
+
     def test_settings_set_request_saves_changed_values(self):
         saved = Mock()
         with patch("mod_manager.cli.save_config", saved):

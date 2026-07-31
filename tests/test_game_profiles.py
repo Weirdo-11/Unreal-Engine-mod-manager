@@ -165,6 +165,41 @@ class GameProfileStorageTests(unittest.TestCase):
         self.assertEqual(storage.load_labels(), {"b.pak": "ui"})
         self.assertEqual(storage.load_presets(), {"ui": ["b.pak"]})
 
+    def test_favorites_are_scoped_by_profile_and_preserved_with_labels(self):
+        cfg = storage.load_config()
+        first = storage.create_game_profile("First Game", {"mods_source_dir": "A", "game_mods_dir": "B"}, cfg)
+        second = storage.create_game_profile("Second Game", {"mods_source_dir": "C", "game_mods_dir": "D"}, cfg)
+
+        storage.set_active_game_profile(cfg, first["id"])
+        storage.save_config(cfg)
+        storage.update_favorites(cfg, ["same.pak"], True)
+        storage.save_labels({"same.pak": "combat"})
+
+        storage.set_active_game_profile(cfg, second["id"])
+        storage.save_config(cfg)
+        self.assertEqual(storage.load_favorites(cfg), set())
+        storage.update_favorites(cfg, ["other.pak"], True)
+
+        storage.set_active_game_profile(cfg, first["id"])
+        storage.save_config(cfg)
+        self.assertEqual(storage.load_favorites(cfg), {"same.pak"})
+        self.assertEqual(storage.load_labels(), {"same.pak": "combat"})
+        raw = storage.load_json(self.labels_path, {})
+        self.assertEqual(raw[storage.FAVORITES_KEY][first["id"]], ["same.pak"])
+        self.assertEqual(raw[storage.FAVORITES_KEY][second["id"]], ["other.pak"])
+
+    def test_reserved_favorites_record_is_not_loaded_as_a_mod(self):
+        storage.save_json(
+            self.labels_path,
+            {
+                "legacy.pak": {"label": "legacy", "last_managed": None, "state": "undefined"},
+                storage.FAVORITES_KEY: {storage.DEFAULT_FAVORITE_SCOPE: ["legacy.pak"]},
+            },
+        )
+
+        self.assertEqual(storage.load_labels(), {"legacy.pak": "legacy"})
+        self.assertNotIn(storage.FAVORITES_KEY, storage.load_mod_records())
+        self.assertEqual(storage.load_favorites({}), {"legacy.pak"})
 
 class GameProfileCliTests(unittest.TestCase):
     def test_games_add_select_and_list_use_profile_contract(self):

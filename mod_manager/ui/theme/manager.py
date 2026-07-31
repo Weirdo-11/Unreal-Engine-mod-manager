@@ -19,6 +19,7 @@ PALETTE_ROLES = (
 )
 
 TEXT_ROLES = ("WindowText", "Text", "ButtonText", "ToolTipText")
+_APPLICATION_BASE_FONT: QtGui.QFont | None = None
 
 
 def custom_color(cfg: dict, mode_key: str, color_key: str) -> str | None:
@@ -45,6 +46,11 @@ class ThemeManager(QtCore.QObject):
         self._palette = colors.build_palette("light")
         self._stylesheet = ""
         self._applying = False
+        global _APPLICATION_BASE_FONT
+        app = QtWidgets.QApplication.instance()
+        if _APPLICATION_BASE_FONT is None:
+            _APPLICATION_BASE_FONT = QtGui.QFont(app.font()) if app is not None else QtGui.QFont()
+        self._base_font = QtGui.QFont(_APPLICATION_BASE_FONT)
 
     @property
     def palette(self) -> colors.Palette:
@@ -53,6 +59,10 @@ class ThemeManager(QtCore.QObject):
     @property
     def stylesheet(self) -> str:
         return self._stylesheet
+
+    @property
+    def base_font(self) -> QtGui.QFont:
+        return QtGui.QFont(self._base_font)
 
     @property
     def mode(self) -> str:
@@ -112,9 +122,7 @@ class ThemeManager(QtCore.QObject):
             app = QtWidgets.QApplication.instance()
             if app is not None:
                 app.setPalette(self.qt_palette(theme))
-                font = build_font(self.cfg, app.font())
-                if font is not None:
-                    app.setFont(font)
+                app.setFont(build_font(self.cfg, self._base_font) or QtGui.QFont(self._base_font))
                 app.setStyleSheet(self._stylesheet)
         finally:
             self._applying = False

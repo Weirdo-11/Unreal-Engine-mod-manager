@@ -30,6 +30,7 @@ def alignment(columns, section: int):
 
 
 def configure_header(view: QtWidgets.QTableView, columns, fixed_widths: dict | None = None) -> None:
+    view.setShowGrid(False)
     header = view.horizontalHeader()
     header.setStretchLastSection(False)
     header.setHighlightSections(False)

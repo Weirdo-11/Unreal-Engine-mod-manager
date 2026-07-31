@@ -141,6 +141,7 @@ Action buttons are never placed in a flat row. Each group is declared in `mod_ma
 - Game profiles with separate game folders, source folders, presets, labels, and active default selection
 - Presets — save and restore named mod sets
 - Labels — tag and filter mods by category
+- Profile-scoped favorites — star mods independently from labels and combine the favorite, label, and search filters
 - Pagination, search, and ordering
 - Broken link detection and cleanup
 - GUI (PySide6/Qt) and CLI interfaces
@@ -185,7 +186,8 @@ pip install -r requirements.txt
 - `config.json` stores application settings and game profile definitions.
 - `profiles/<profile-id>-presets.json` stores named mod sets for each game profile.
 - `profiles/<profile-id>-labels.json` stores labels plus last-managed metadata for each game profile.
-- Existing global `presets.json` and `labels.json` remain supported when no game profile exists.
+- `labels.json` also stores the reserved `__favorites__` map, keyed by game profile ID; existing flat label records remain supported.
+- Existing global `presets.json` and label records remain supported when no game profile exists.
 - `<mods_source_dir>/images` stores optional mod image and is not treated as a mod folder.
 </details>
 
@@ -246,6 +248,8 @@ python mod-manager.py games select <profile-id>
 | `toggle <indexes>` | Toggle mods by index (comma-separated) |
 | `label-add <label> <indexes>` | Assign label to selected mods |
 | `label-remove <label> <indexes>` | Remove label from selected mods |
+| `favorite-add <indexes>` | Add visible mods to favorites by index |
+| `favorite-remove <indexes>` | Remove visible mods from favorites by index |
 
 **Common flags** (for `list`, `install`, `uninstall`, `toggle`):
 
@@ -254,6 +258,7 @@ python mod-manager.py games select <profile-id>
 --label <text>   Filter by label
 --search <text>  Filter by name
 --order <mode>   Sort order
+--favorite       Show favorite mods only
 ```
 
 Order modes: `default`, `created_date`, `last_managed`, `label`, `name`, `installed`.
@@ -268,7 +273,11 @@ python mod-manager.py mods list --order -last_managed
 python mod-manager.py mods toggle 1,3,5
 python mod-manager.py mods label-add combat 2,4 --page 1
 python mod-manager.py mods install --label combat
+python mod-manager.py mods list --label combat --favorite
+python mod-manager.py mods favorite-add 1,3 --filter-label combat
 ```
+
+In the GUI, the favorite filter is the star button beside the Label filter. A filled star marks an existing favorite; an outline star appears when a mod row or tile is hovered. The page toolbars accept a page number and apply it on Enter while the field has focus.
 
 ---
 
@@ -334,7 +343,7 @@ In the GUI, the "Game profile" dialog (Games > Add/Edit) shows a "Scan subfolder
 
 Every setting is defined once in `mod_manager/settings_schema.py` with a human-readable label, a description shown as a hover tooltip, and its allowed range. The Settings dialog and the Game profile dialog are both generated from that schema, so a setting only ever has one label and one description.
 
-The dialog groups the settings into four sections:
+The dialog groups the settings into four compact bordered sections:
 
 | Section | Contains |
 |---|---|
@@ -345,7 +354,7 @@ The dialog groups the settings into four sections:
 
 Values are validated on save; an out-of-range number is reported by label, for example `Mods per page must be between 1 and 1000.`
 
-`Interface scale` (`ui_scale_percent`) is applied through `QT_SCALE_FACTOR` at startup and needs the application restarted to take effect. `Font family` and `Font size` apply immediately after saving.
+`Interface scale` (`ui_scale_percent`) is applied through `QT_SCALE_FACTOR` at startup and needs the application restarted to take effect. `Font family` and `Font size` have a local preview in Settings and apply to the existing interface immediately after saving.
 
 The GUI theme, accent color, and text color all apply immediately when saved — no restart needed. While set to `system`, the GUI also follows live OS theme/accent changes without restarting.
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from ... import settings_schema
-from ...settings_schema import SETTINGS_SECTIONS
+from ...settings_schema import INT, SETTINGS_SECTIONS
 from ...workers import _run_save_settings
 from .. import icons
 from ..dialogs import prompts
@@ -16,6 +16,8 @@ from .widget_registry import ACTIONS
 TITLE = "Settings"
 SAVED_MESSAGE = "Settings saved."
 PREVIEW_LABEL = "Theme preview"
+FONT_PREVIEW_LABEL = "Font preview"
+FONT_PREVIEW_TEXT = "Aa — The quick brown fox 0123456789"
 ACCENT_KEY = "gui_accent_color"
 TEXT_KEY = "gui_text_color"
 MODE_SUFFIX = "_mode"
@@ -63,18 +65,38 @@ class SettingsController(QtCore.QObject):
         values = settings_schema.read_settings(self.cfg)
         for title, specs in SETTINGS_SECTIONS:
             self.form.add_section(title)
+            pending_int = None
             for spec in specs:
                 action = None
                 if spec.key in COLOR_ACTIONS:
                     key, icon_name, tooltip = COLOR_ACTIONS[spec.key]
                     action = (key, icon_name, tooltip, lambda k=spec.key: self.choose_color(k))
+                if spec.kind == INT and spec.depends_on is None:
+                    if pending_int is None:
+                        pending_int = (spec, values[spec.key])
+                    else:
+                        self.form.add_spec_pair(pending_int, (spec, values[spec.key]))
+                        pending_int = None
+                    continue
+                if pending_int is not None:
+                    pending_spec, pending_value = pending_int
+                    self.form.add_spec(pending_spec, pending_value, self.browse)
+                    pending_int = None
                 self.form.add_spec(spec, values[spec.key], self.browse, action)
+            if pending_int is not None:
+                pending_spec, pending_value = pending_int
+                self.form.add_spec(pending_spec, pending_value, self.browse)
+            if title == "Appearance":
+                self.form.add_widget(FONT_PREVIEW_LABEL, self._build_font_preview())
+                self.form.add_widget(PREVIEW_LABEL, self._build_preview_row())
 
-        self.form.add_widget(PREVIEW_LABEL, self._build_preview_row())
         for key in (ACCENT_KEY, TEXT_KEY):
             self.fields[key + MODE_SUFFIX].currentTextChanged.connect(self._on_color_mode_changed)
         self.update_color_rows()
         self.update_preview()
+        self.fields["gui_font_family"].currentTextChanged.connect(self.update_font_preview)
+        self.fields["gui_font_size"].textChanged.connect(self.update_font_preview)
+        self.update_font_preview()
 
         self.toolbar = IconToolbar(self.dialog)
         self.toolbar.build(SETTINGS_TOOLBAR_SECTIONS)
@@ -111,6 +133,25 @@ class SettingsController(QtCore.QObject):
         row.addWidget(self.text_badge)
         row.addStretch(1)
         return container
+
+    def _build_font_preview(self) -> QtWidgets.QLabel:
+        self.font_preview = QtWidgets.QLabel(FONT_PREVIEW_TEXT)
+        self.font_preview.setMinimumHeight(tokens.FONT_PREVIEW_MIN_HEIGHT)
+        self.font_preview.setAlignment(QtCore.Qt.AlignCenter)
+        return self.font_preview
+
+    def update_font_preview(self, _value: str = "") -> None:
+        font = self.window.theme.base_font
+        family = self.fields["gui_font_family"].currentText().strip()
+        if family:
+            font.setFamily(family)
+        try:
+            size = int(self.fields["gui_font_size"].text())
+        except ValueError:
+            size = 0
+        if size > 0:
+            font.setPointSize(size)
+        self.font_preview.setFont(font)
 
     def browse(self, key: str) -> None:
         path = prompts.choose_directory(self.window, settings_schema.label_for(key))

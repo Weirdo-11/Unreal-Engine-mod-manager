@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from .theme import tokens
@@ -24,10 +26,26 @@ STANDARD_ICONS = {
     "uninstall": "SP_DialogDiscardButton",
 }
 
+CUSTOM_ICONS = {
+    "broken",
+    "delete",
+    "edit",
+    "favorite",
+    "favorite_filled",
+    "filter_apply",
+    "filter_clear",
+    "settings",
+    "submit",
+}
+
 FALLBACK_ICON = "SP_FileIcon"
 
 
 def standard_icon(name: str, style=None) -> QtGui.QIcon:
+    if name in CUSTOM_ICONS:
+        app = QtWidgets.QApplication.instance()
+        palette = app.palette() if app is not None else QtGui.QPalette()
+        return glyph_icon(name, palette.color(QtGui.QPalette.ButtonText))
     style = style or QtWidgets.QApplication.style()
     pixmap_name = STANDARD_ICONS.get(name, FALLBACK_ICON)
     return style.standardIcon(getattr(QtWidgets.QStyle, pixmap_name))
@@ -55,6 +73,85 @@ def _path(points) -> QtGui.QPainterPath:
     for point in points[1:]:
         path.lineTo(*point)
     return path
+
+
+def _star_path(size: int) -> QtGui.QPainterPath:
+    center = size / 2
+    path = QtGui.QPainterPath()
+    for index in range(tokens.STAR_POINTS * 2):
+        radius = tokens.STAR_OUTER_RADIUS if index % 2 == 0 else tokens.STAR_INNER_RADIUS
+        angle = math.radians(tokens.STAR_START_DEGREES + index * tokens.STAR_STEP_DEGREES)
+        point = QtCore.QPointF(center + math.cos(angle) * radius, center + math.sin(angle) * radius)
+        if index == 0:
+            path.moveTo(point)
+        else:
+            path.lineTo(point)
+    path.closeSubpath()
+    return path
+
+
+def _scaled_path(points, size: int) -> QtGui.QPainterPath:
+    scale = size / tokens.ICON_SIZE
+    return _path([(x * scale, y * scale) for x, y in points])
+
+
+def glyph_icon(name: str, color, size: int = tokens.ICON_SIZE) -> QtGui.QIcon:
+    pixmap = _transparent_pixmap(size)
+    painter = _painter(pixmap)
+    pen = _round_pen(color, tokens.GLYPH_PEN)
+    painter.setPen(pen)
+    painter.setBrush(QtCore.Qt.NoBrush)
+    scale = size / tokens.ICON_SIZE
+
+    if name in {"favorite", "favorite_filled"}:
+        path = _star_path(size)
+        if name == "favorite_filled":
+            painter.setBrush(QtGui.QColor(color))
+        painter.drawPath(path)
+    elif name == "settings":
+        center = QtCore.QPointF(tokens.GLYPH_CENTER * scale, tokens.GLYPH_CENTER * scale)
+        painter.drawEllipse(center, tokens.GLYPH_LARGE_RADIUS * scale, tokens.GLYPH_LARGE_RADIUS * scale)
+        painter.drawEllipse(center, tokens.GLYPH_SMALL_RADIUS * scale, tokens.GLYPH_SMALL_RADIUS * scale)
+        for index in range(tokens.STAR_POINTS + 3):
+            angle = math.radians(index * 45)
+            inner = tokens.GLYPH_LARGE_RADIUS * scale
+            outer = (tokens.GLYPH_LARGE_RADIUS + tokens.GLYPH_MARGIN) * scale
+            painter.drawLine(
+                QtCore.QPointF(center.x() + math.cos(angle) * inner, center.y() + math.sin(angle) * inner),
+                QtCore.QPointF(center.x() + math.cos(angle) * outer, center.y() + math.sin(angle) * outer),
+            )
+    elif name == "delete":
+        left = tokens.TRASH_LEFT * scale
+        right = tokens.TRASH_RIGHT * scale
+        top = tokens.TRASH_TOP * scale
+        bottom = tokens.TRASH_BOTTOM * scale
+        painter.drawLine(left, top, right, top)
+        painter.drawLine((left + right) / 2 - scale, top - 2 * scale, (left + right) / 2 + scale, top - 2 * scale)
+        painter.drawRoundedRect(QtCore.QRectF(left + scale, top + scale, right - left - 2 * scale, bottom - top), scale, scale)
+        painter.drawLine(left + 3 * scale, top + 3 * scale, left + 3 * scale, bottom - scale)
+        painter.drawLine(right - 3 * scale, top + 3 * scale, right - 3 * scale, bottom - scale)
+    elif name in {"filter_apply", "filter_clear"}:
+        painter.drawPath(_scaled_path(tokens.FILTER_PATH, size))
+        if name == "filter_apply":
+            painter.drawPath(_scaled_path(tokens.CHECK_SMALL_PATH, size))
+        else:
+            for start, end in tokens.CROSS_SMALL_PATH:
+                painter.drawLine(
+                    QtCore.QPointF(start[0] * scale, start[1] * scale),
+                    QtCore.QPointF(end[0] * scale, end[1] * scale),
+                )
+    elif name == "edit":
+        painter.drawPath(_scaled_path(tokens.EDIT_PATH, size))
+    elif name == "submit":
+        painter.drawPath(_scaled_path(tokens.SUBMIT_PATH, size))
+        painter.drawLine(3 * scale, 4 * scale, 3 * scale, 14 * scale)
+    elif name == "broken":
+        painter.drawPath(_scaled_path(tokens.BROKEN_LEFT_PATH, size))
+        painter.drawPath(_scaled_path(tokens.BROKEN_RIGHT_PATH, size))
+        painter.drawPath(_scaled_path(tokens.BROKEN_SLASH_PATH, size))
+
+    painter.end()
+    return QtGui.QIcon(pixmap)
 
 
 def check_icon(color, size: int = tokens.ICON_SIZE, transparent: bool = False) -> QtGui.QIcon:

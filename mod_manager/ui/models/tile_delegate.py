@@ -4,6 +4,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from ...models import ModItem
 from ...mods import mod_image_path
+from .. import icons
 from ..theme import colors, tokens
 
 NO_IMAGE_TEXT = "No image"
@@ -19,10 +20,13 @@ def qcolor(value) -> QtGui.QColor:
 
 
 class TileDelegate(QtWidgets.QStyledItemDelegate):
+    favoriteToggled = QtCore.Signal(str)
+
     def __init__(self, cfg: dict, palette: colors.Palette | None = None, parent=None):
         super().__init__(parent)
         self.cfg = cfg
         self._pixmaps: dict[tuple[str, int], QtGui.QPixmap] = {}
+        self.favorites: set[str] = set()
         self.set_palette(palette or colors.build_palette("light"))
 
     def set_palette(self, palette: colors.Palette) -> None:
@@ -42,6 +46,9 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
             self._pixmaps.clear()
             return
         self._pixmaps = {key: value for key, value in self._pixmaps.items() if key[0] != mod_name}
+
+    def set_favorites(self, favorites: set[str]) -> None:
+        self.favorites = set(favorites)
 
     def paint(self, painter, option, index) -> None:
         painter.save()
@@ -96,7 +103,29 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
             QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft,
             self._elided_mod_name(painter.fontMetrics(), mod.name, name_badge.width() - inset * 2),
         )
+        favorite = mod.name in self.favorites
+        hovered = bool(option.state & QtWidgets.QStyle.State_MouseOver)
+        if favorite or hovered:
+            favorite_rect = self._favorite_rect(image_rect)
+            icon = icons.glyph_icon(
+                "favorite_filled" if favorite else "favorite",
+                foreground,
+            )
+            icon.paint(painter, favorite_rect, QtCore.Qt.AlignCenter)
         painter.restore()
+
+    def editorEvent(self, event, model, option, index) -> bool:
+        if event.type() in {QtCore.QEvent.MouseButtonPress, QtCore.QEvent.MouseButtonRelease} and event.button() == QtCore.Qt.LeftButton:
+            mod = index.data(QtCore.Qt.UserRole)
+            rect = self._content_rect(option)
+            favorite_rect = self._favorite_rect(self._image_rect(rect))
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            if mod is not None and favorite_rect.contains(pos):
+                if event.type() == QtCore.QEvent.MouseButtonPress:
+                    return True
+                self.favoriteToggled.emit(mod.name)
+                return True
+        return super().editorEvent(event, model, option, index)
 
     def helpEvent(self, event, view, option, index) -> bool:
         tooltip = self._tooltip_for_pos(option, index, event.pos())
@@ -182,6 +211,15 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
         pad = tokens.TILE_CONTENT_PAD
         return QtCore.QRect(rect.left() + pad, image_rect.bottom() + pad, rect.width() - pad * 2, tokens.TILE_BADGE_HEIGHT)
 
+    def _favorite_rect(self, image_rect: QtCore.QRect) -> QtCore.QRect:
+        size = min(tokens.FAVORITE_HIT_SIZE, image_rect.height())
+        return QtCore.QRect(
+            image_rect.right() - size - tokens.FAVORITE_MARGIN,
+            image_rect.bottom() - size - tokens.FAVORITE_MARGIN,
+            size,
+            size,
+        )
+
     def _tooltip_for_pos(self, option, index, pos: QtCore.QPoint) -> str:
         mod = index.data(QtCore.Qt.UserRole)
         if mod is None:
@@ -196,6 +234,9 @@ class TileDelegate(QtWidgets.QStyledItemDelegate):
             if label_badge.contains(pos) and label != label_badge_text:
                 return label
         name_badge = self._name_badge_rect(rect, image_rect)
+        favorite_rect = self._favorite_rect(image_rect)
+        if favorite_rect.contains(pos):
+            return "Remove from favorites" if mod.name in self.favorites else "Add to favorites"
         if name_badge.contains(pos):
             elided = self._elided_mod_name(metrics, mod.name, name_badge.width() - tokens.TILE_NAME_TEXT_INSET * 2)
             if elided != mod.name:

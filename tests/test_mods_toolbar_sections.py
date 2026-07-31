@@ -13,7 +13,11 @@ if qt_available():
 
 EXPECTED_TOOLBAR = (
     ("game", "Game", ("manage game profiles",)),
-    ("filter", "Search", ("Apply search and label filters", "Clear search and label filters")),
+    ("filter", "Search", (
+        "Apply search, label and favorite filters",
+        "Clear search, label and favorite filters",
+        "Show favorite mods only",
+    )),
     ("order", "Order", ("Sort ascending",)),
     ("view", "View", ("Show mods as a list", "Show mods as tiles")),
     ("manage", "Manage", ("Open presets", "Open settings", "Open broken links cleanup")),
@@ -26,7 +30,11 @@ EXPECTED_ACTIONS = (
         "Uninstall all mods on the current page",
         "Toggle selected mods",
     )),
-    ("label", "Label", ("Add label to selected mods", "Remove label from selected mods")),
+    ("label", "Label", (
+        "Add label to selected mods",
+        "Remove label from selected mods",
+        "Add or remove selected mods from favorites",
+    )),
     ("import", "Import", ("Import mod files", "Import a mod folder", "Set preview image for the selected mod")),
 )
 
@@ -74,6 +82,7 @@ class ModsToolbarSectionTest(WindowTestCase):
         widgets = self.window.mods_toolbar.sections["filter"].widgets()
         self.assertIn(self.window.search_box, widgets)
         self.assertIn(self.window.label_filter_box, widgets)
+        self.assertIn(self.window.favorite_filter_button, widgets)
 
     def test_order_combo_belongs_to_the_order_section(self):
         self.assertIn(self.window.order_box, self.window.mods_toolbar.sections["order"].widgets())

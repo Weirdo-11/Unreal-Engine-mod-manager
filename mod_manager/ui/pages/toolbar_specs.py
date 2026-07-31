@@ -3,8 +3,9 @@ from __future__ import annotations
 MODS_TOOLBAR_SECTIONS = (
     ("game", "Game", ()),
     ("filter", "Search", (
-        ("search", "search", "Apply search and label filters"),
-        ("clear", "clear", "Clear search and label filters"),
+        ("search", "filter_apply", "Apply search, label and favorite filters"),
+        ("clear", "filter_clear", "Clear search, label and favorite filters"),
+        ("favorite_filter", "favorite", "Show favorite mods only"),
     )),
     ("order", "Order", ()),
     ("view", "View", (
@@ -13,8 +14,8 @@ MODS_TOOLBAR_SECTIONS = (
     )),
     ("manage", "Manage", (
         ("presets", "save", "Open presets"),
-        ("settings", "open", "Open settings"),
-        ("broken", "delete", "Open broken links cleanup"),
+        ("settings", "settings", "Open settings"),
+        ("broken", "broken", "Open broken links cleanup"),
     )),
 )
 
@@ -28,6 +29,7 @@ MODS_ACTION_SECTIONS = (
     ("label", "Label", (
         ("add_label", "add", "Add label to selected mods"),
         ("remove_label", "remove", "Remove label from selected mods"),
+        ("favorite_selected", "favorite", "Add or remove selected mods from favorites"),
     )),
     ("import", "Import", (
         ("import_files", "import", "Import mod files"),
@@ -54,11 +56,11 @@ BROKEN_TOOLBAR_SECTIONS = (
 
 GAMES_TOOLBAR_SECTIONS = (
     ("choose", "Game", (
-        ("select", "toggle", "Select the highlighted game"),
+        ("select", "submit", "Select the highlighted game"),
     )),
     ("profiles", "Profiles", (
         ("add", "add", "Add a game profile"),
-        ("edit", "open", "Edit the highlighted game profile"),
+        ("edit", "edit", "Edit the highlighted game profile"),
         ("delete", "delete", "Delete the highlighted game profile"),
     )),
 )
@@ -69,7 +71,7 @@ SETTINGS_TOOLBAR_SECTIONS = (
     )),
 )
 
-SELECTION_ACTIONS = ("toggle_selected", "add_label", "remove_label", "set_image")
+SELECTION_ACTIONS = ("toggle_selected", "add_label", "remove_label", "favorite_selected", "set_image")
 
 
 def section_keys(specs) -> tuple[str, ...]:

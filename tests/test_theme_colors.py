@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from mod_manager.ui.theme import colors, tokens
+from mod_manager.ui.theme.stylesheet import build_stylesheet
 
 LEGACY_DARK = {
     "bg": "#202124",
@@ -146,6 +147,15 @@ class PaletteParityTest(unittest.TestCase):
         self.assertEqual(colors.build_palette("system").mode, "light")
         self.assertFalse(colors.build_palette("system").is_dark)
         self.assertTrue(colors.build_palette("dark").is_dark)
+
+    def test_table_selection_uses_accent_background_without_a_border(self):
+        palette = colors.build_palette("dark", "#2563eb")
+        stylesheet = build_stylesheet(palette)
+        selection_rule = stylesheet.split("QTableView::item:selected {", 1)[1].split("}", 1)[0]
+        self.assertIn(f"background-color: {palette.accent};", selection_rule)
+        self.assertIn(f"color: {palette.accent_text};", selection_rule)
+        self.assertIn("border: none;", selection_rule)
+        self.assertIn("outline: none;", selection_rule)
 
 
 class TextOverrideTest(unittest.TestCase):

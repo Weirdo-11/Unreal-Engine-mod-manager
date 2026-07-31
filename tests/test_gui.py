@@ -164,6 +164,63 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(self.window.broken_dialog.isVisible())
         self.window.broken_dialog.close()
 
+    def test_duplicate_manage_menu_is_not_built(self):
+        self.assertIsNone(self.window.menuWidget())
+
+    def test_page_inputs_apply_on_enter_for_mods_and_presets(self):
+        self.window.page_control.set_page(1, 5)
+        with patch.object(self.window, "refresh_mods") as refresh_mods:
+            self.window.page_control.input.setText("3")
+            self.window.page_control.input.returnPressed.emit()
+        self.assertEqual(self.window.mod_page.get(), 3)
+        refresh_mods.assert_called_once_with()
+
+        self.window.preset_page_control.set_page(1, 4)
+        with patch.object(self.window, "refresh_presets") as refresh_presets:
+            self.window.preset_page_control.input.setText("2")
+            self.window.preset_page_control.input.returnPressed.emit()
+        self.assertEqual(self.window.preset_page.get(), 2)
+        refresh_presets.assert_called_once_with()
+
+    def test_favorite_filter_combines_with_search_and_label(self):
+        self.window.search_var.set("pak")
+        self.window.label_filter_var.set("combat")
+        with patch(
+            "mod_manager.ui.app.mods_view",
+            return_value=(self.mods, self.mods, 1, 1, {"combat.pak": "combat"}),
+        ) as mods_view:
+            self.window.favorite_filter_button.click()
+
+        self.assertTrue(self.window.favorite_filter_var.get())
+        mods_view.assert_called_once_with(self.window.cfg, 1, "combat", "pak", "default", True)
+
+    def test_selected_favorite_action_adds_or_removes_the_whole_selection(self):
+        self.select_mod_rows(0, 1)
+        self.window.current_mod_favorites = {"combat.pak"}
+        with patch("mod_manager.ui.app.add_favorites_to_mods", return_value="Added") as add, patch.object(
+            self.window, "refresh_mods"
+        ):
+            self.window._toggle_favorite_selected()
+        add.assert_called_once_with(self.window.cfg, ["combat.pak", "ui.pak"])
+
+        self.window.current_mod_favorites = {"combat.pak", "ui.pak"}
+        with patch("mod_manager.ui.app.remove_favorites_from_mods", return_value="Removed") as remove, patch.object(
+            self.window, "refresh_mods"
+        ):
+            self.window._toggle_favorite_selected()
+        remove.assert_called_once_with(self.window.cfg, ["combat.pak", "ui.pak"])
+
+    def test_single_mod_detail_exposes_favorite_action(self):
+        self.window.current_mod_favorites = set()
+        self.window._refresh_mod_detail(self.mods[0])
+        labels = [button.text() for button in self.window.detail_frame.findChildren(QtWidgets.QPushButton)]
+        self.assertIn("Add to favorites", labels)
+
+        self.window.current_mod_favorites = {"combat.pak"}
+        self.window._refresh_mod_detail(self.mods[0])
+        labels = [button.text() for button in self.window.detail_frame.findChildren(QtWidgets.QPushButton)]
+        self.assertIn("Remove from favorites", labels)
+
     def test_filter_boxes_use_popup_completion_without_inline_autofill(self):
         for box in (self.window.search_box, self.window.label_filter_box):
             self.assertEqual(box.insertPolicy(), QtWidgets.QComboBox.NoInsert)
@@ -580,8 +637,12 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.mod_selection_widgets[0].sizePolicy().horizontalPolicy(), QtWidgets.QSizePolicy.Fixed)
 
     def test_dialog_fields_expand_to_available_width(self):
-        for key in ("page_size", "mods_source_dir", "game_mods_dir"):
+        for key in ("mods_source_dir", "game_mods_dir"):
             self.assertEqual(self.window.setting_widgets[key].sizePolicy().horizontalPolicy(), QtWidgets.QSizePolicy.Expanding)
+        self.assertEqual(
+            self.window.setting_widgets["page_size"].sizePolicy().horizontalPolicy(),
+            QtWidgets.QSizePolicy.Fixed,
+        )
         self.assertEqual(self.window.setting_widgets["mods_source_dir"].maximumWidth(), 16777215)
         presets_header = self.window.presets_table.horizontalHeader()
         self.assertFalse(presets_header.stretchLastSection())

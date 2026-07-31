@@ -11,7 +11,7 @@ from mod_manager.models import ModItem
 if qt_available():
     from PySide6 import QtCore, QtGui, QtWidgets
 
-    from mod_manager.ui.models import BrokenTableModel, ModTableModel, PresetTableModel, TileDelegate, configure_header
+    from mod_manager.ui.models import BrokenTableModel, FavoriteDelegate, ModTableModel, PresetTableModel, TileDelegate, configure_header
     from mod_manager.ui.models import columns as columns_module
     from mod_manager.ui.theme import colors, tokens
 
@@ -147,6 +147,7 @@ class ConfigureHeaderTest(unittest.TestCase):
         self.assertEqual(header.sectionResizeMode(2), QtWidgets.QHeaderView.ResizeToContents)
         self.assertFalse(header.stretchLastSection())
         self.assertFalse(view.verticalHeader().isVisible())
+        self.assertFalse(view.showGrid())
 
     def test_fixed_widths_are_applied_by_column_key(self):
         view = QtWidgets.QTableView()
@@ -204,6 +205,54 @@ class TileDelegateTest(unittest.TestCase):
         self.assertTrue(card.contains(image))
         self.assertTrue(card.contains(self.delegate._label_badge_rect(card, metrics, "label")))
         self.assertTrue(card.contains(self.delegate._name_badge_rect(card, image)))
+
+    def test_tile_favorite_star_handles_clicks(self):
+        model = ModTableModel(colors.FALLBACK_ACCENT)
+        model.set_data(mods(), {}, {}, {"combat.pak"})
+        option = QtWidgets.QStyleOptionViewItem()
+        option.rect = QtCore.QRect(0, 0, *tokens.tile_item_size(140))
+        card = self.delegate._content_rect(option)
+        star = self.delegate._favorite_rect(self.delegate._image_rect(card))
+        event = QtGui.QMouseEvent(
+            QtCore.QEvent.MouseButtonRelease,
+            QtCore.QPointF(star.center()),
+            QtCore.Qt.LeftButton,
+            QtCore.Qt.LeftButton,
+            QtCore.Qt.NoModifier,
+        )
+        toggled = []
+        self.delegate.favoriteToggled.connect(toggled.append)
+
+        self.assertTrue(self.delegate.editorEvent(event, model, option, model.index(0, 0)))
+        self.assertEqual(toggled, ["combat.pak"])
+
+
+@unittest.skipUnless(qt_available(), "PySide6 is not installed")
+class FavoriteDelegateTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = qt_app()
+
+    def test_table_favorite_star_handles_clicks(self):
+        model = ModTableModel(colors.FALLBACK_ACCENT)
+        model.set_data(mods(), {}, {}, {"combat.pak"})
+        delegate = FavoriteDelegate()
+        delegate.set_favorites({"combat.pak"})
+        option = QtWidgets.QStyleOptionViewItem()
+        option.rect = QtCore.QRect(0, 0, 240, 32)
+        star = delegate.star_rect(option.rect)
+        event = QtGui.QMouseEvent(
+            QtCore.QEvent.MouseButtonRelease,
+            QtCore.QPointF(star.center()),
+            QtCore.Qt.LeftButton,
+            QtCore.Qt.LeftButton,
+            QtCore.Qt.NoModifier,
+        )
+        toggled = []
+        delegate.favoriteToggled.connect(toggled.append)
+
+        self.assertTrue(delegate.editorEvent(event, model, option, model.index(0, 1)))
+        self.assertEqual(toggled, ["combat.pak"])
 
 
 if __name__ == "__main__":

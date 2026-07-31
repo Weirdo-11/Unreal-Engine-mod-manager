@@ -32,6 +32,7 @@ def icon_button(
 ) -> QtWidgets.QPushButton:
     button = _base_button("", tooltip, accessible_name or tooltip, parent)
     button.setIcon(icons.standard_icon(icon_name))
+    button.setProperty("iconName", icon_name)
     button.setIconSize(QtCore.QSize(tokens.ICON_SIZE, tokens.ICON_SIZE))
     button.setFixedSize(tokens.ICON_BUTTON_SIZE, tokens.ICON_BUTTON_SIZE)
     button.setCheckable(checkable)
@@ -50,6 +51,7 @@ def text_button(
     button = _base_button(text, tooltip, accessible_name or text, parent)
     if icon_name:
         button.setIcon(icons.standard_icon(icon_name))
+        button.setProperty("iconName", icon_name)
         button.setIconSize(QtCore.QSize(tokens.ICON_SIZE, tokens.ICON_SIZE))
     _connect(button, on_click)
     return button

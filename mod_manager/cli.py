@@ -8,12 +8,14 @@ from app_paths import APP_NAME, APP_VERSION
 from . import settings_schema
 from .cli_utils import ensure_paths, open_folder, parse_multi_choice
 from .mods import (
+    add_favorites_to_mods,
     add_label_to_mods,
     apply_mods_page,
     deactivate_mod,
     deactivate_mods_page,
     list_broken_links,
     mods_view,
+    remove_favorites_from_mods,
     remove_label_from_mods,
     toggle_mods_by_indexes,
 )
@@ -72,9 +74,15 @@ def _add_view_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--label", default="")
     parser.add_argument("--search", default="")
     parser.add_argument("--order", type=_order, default="d")
+    parser.add_argument("--favorite", action="store_true")
 
-def _print_mods(cfg: Dict, page: int, label: str, search: str, order: str) -> int:
-    items, shown, page, pages, labels = mods_view(cfg, page, label, search, order)
+def _filtered_mods_view(cfg: Dict, page: int, label: str, search: str, order: str, favorite_only: bool = False):
+    if favorite_only:
+        return mods_view(cfg, page, label, search, order, True)
+    return mods_view(cfg, page, label, search, order)
+
+def _print_mods(cfg: Dict, page: int, label: str, search: str, order: str, favorite_only: bool = False) -> int:
+    items, shown, page, pages, labels = _filtered_mods_view(cfg, page, label, search, order, favorite_only)
     print(f"Page {page}/{pages}")
     for i, mod in enumerate(shown, 1):
         mark = "X" if mod.installed else " "
@@ -96,8 +104,16 @@ def _print_presets(cfg: Dict, page: int) -> int:
         print("No presets saved.")
     return 0
 
-def _selected_mod_names(cfg: Dict, page: int, label: str, search: str, order: str, indexes: List[int]) -> List[str]:
-    _items, shown, _page, _pages, _labels = mods_view(cfg, page, label, search, order)
+def _selected_mod_names(
+    cfg: Dict,
+    page: int,
+    label: str,
+    search: str,
+    order: str,
+    indexes: List[int],
+    favorite_only: bool = False,
+) -> List[str]:
+    _items, shown, _page, _pages, _labels = _filtered_mods_view(cfg, page, label, search, order, favorite_only)
     return [shown[i - 1].name for i in indexes if 1 <= i <= len(shown)]
 
 def _run_mods(args: argparse.Namespace, cfg: Dict) -> int:
@@ -108,28 +124,46 @@ def _run_mods(args: argparse.Namespace, cfg: Dict) -> int:
         label = args.text if args.mods_cmd == "label" else args.label
         page = args.number if args.mods_cmd == "page" else args.page
         order = args.mode if args.mods_cmd == "order" else args.order
-        return _print_mods(cfg, page, label, search, order)
+        return _print_mods(cfg, page, label, search, order, args.favorite)
     if args.mods_cmd == "install":
-        page, total, err = apply_mods_page(cfg, args.page, args.label, args.search, args.order)
+        view_args = (cfg, args.page, args.label, args.search, args.order)
+        page, total, err = apply_mods_page(*view_args, True) if args.favorite else apply_mods_page(*view_args)
         print(f"Installed {total - err}/{total} on page {page}. Errors: {err}.")
         return 1 if err else 0
     if args.mods_cmd == "uninstall":
-        page, count = deactivate_mods_page(cfg, args.page, args.label, args.search, args.order)
+        view_args = (cfg, args.page, args.label, args.search, args.order)
+        page, count = deactivate_mods_page(*view_args, True) if args.favorite else deactivate_mods_page(*view_args)
         print(f"Uninstalled {count} on page {page}.")
         return 0
     if args.mods_cmd == "toggle":
-        _items, shown, _page, _pages, _labels = mods_view(cfg, args.page, args.label, args.search, args.order)
+        _items, shown, _page, _pages, _labels = _filtered_mods_view(
+            cfg, args.page, args.label, args.search, args.order, args.favorite
+        )
         msg = toggle_mods_by_indexes(shown, args.indexes)
         print(msg or "No mods toggled.")
         return 0
     if args.mods_cmd == "label-add":
-        targets = _selected_mod_names(cfg, args.page, args.filter_label, args.search, args.order, args.indexes)
+        targets = _selected_mod_names(
+            cfg, args.page, args.filter_label, args.search, args.order, args.indexes, args.favorite
+        )
         print(add_label_to_mods(args.label, targets) if targets else "Invalid index.")
         return 0 if targets else 1
     if args.mods_cmd == "label-remove":
-        targets = _selected_mod_names(cfg, args.page, args.filter_label, args.search, args.order, args.indexes)
+        targets = _selected_mod_names(
+            cfg, args.page, args.filter_label, args.search, args.order, args.indexes, args.favorite
+        )
         print(remove_label_from_mods(args.label, targets) if targets else "Invalid index.")
         return 0 if targets else 1
+    if args.mods_cmd in {"favorite-add", "favorite-remove"}:
+        targets = _selected_mod_names(
+            cfg, args.page, args.filter_label, args.search, args.order, args.indexes, args.favorite
+        )
+        if not targets:
+            print("Invalid index.")
+            return 1
+        action = add_favorites_to_mods if args.mods_cmd == "favorite-add" else remove_favorites_from_mods
+        print(action(cfg, targets))
+        return 0
     return 1
 
 def _run_presets(args: argparse.Namespace, cfg: Dict) -> int:
@@ -264,21 +298,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--page", type=int, default=1)
     p.add_argument("--label", default="")
     p.add_argument("--order", type=_order, default="d")
+    p.add_argument("--favorite", action="store_true")
     p = mods_sub.add_parser("label")
     p.add_argument("text")
     p.add_argument("--page", type=int, default=1)
     p.add_argument("--search", default="")
     p.add_argument("--order", type=_order, default="d")
+    p.add_argument("--favorite", action="store_true")
     p = mods_sub.add_parser("page")
     p.add_argument("number", type=int)
     p.add_argument("--label", default="")
     p.add_argument("--search", default="")
     p.add_argument("--order", type=_order, default="d")
+    p.add_argument("--favorite", action="store_true")
     p = mods_sub.add_parser("order")
     p.add_argument("mode", type=_order)
     p.add_argument("--page", type=int, default=1)
     p.add_argument("--label", default="")
     p.add_argument("--search", default="")
+    p.add_argument("--favorite", action="store_true")
     mods_sub.choices["toggle"].add_argument("indexes", type=_indexes)
     for name in ["label-add", "label-remove"]:
         p = mods_sub.add_parser(name)
@@ -288,6 +326,15 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--filter-label", default="")
         p.add_argument("--search", default="")
         p.add_argument("--order", type=_order, default="d")
+        p.add_argument("--favorite", action="store_true")
+    for name in ["favorite-add", "favorite-remove"]:
+        p = mods_sub.add_parser(name)
+        p.add_argument("indexes", type=_indexes)
+        p.add_argument("--page", type=int, default=1)
+        p.add_argument("--filter-label", default="")
+        p.add_argument("--search", default="")
+        p.add_argument("--order", type=_order, default="d")
+        p.add_argument("--favorite", action="store_true")
 
     presets = sub.add_parser("presets")
     presets_sub = presets.add_subparsers(dest="presets_cmd", required=True)

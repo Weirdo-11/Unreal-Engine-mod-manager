@@ -7,7 +7,15 @@ from typing import Dict, List, Tuple
 from .models import ModItem
 from .links import mklink, mklink_batch, unlink_path
 from .platform_utils import is_windows
-from .storage import load_labels, save_labels, mark_mods_managed, load_mod_records, ensure_mod_records
+from .storage import (
+    ensure_mod_records,
+    load_favorites,
+    load_labels,
+    load_mod_records,
+    mark_mods_managed,
+    save_labels,
+    update_favorites,
+)
 from .cli_utils import filter_items_by_query, page_slice, paginate, sort_items
 
 IMAGE_EXTENSIONS = {".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".ppm", ".pgm"}
@@ -155,7 +163,14 @@ def apply_mods_batch(mods: List[ModItem]) -> List[Tuple[bool, str]]:
 def deactivate_mod(mod: ModItem) -> Tuple[bool, str]:
     return unlink_path(mod.dest)
 
-def mods_view(cfg: Dict, page: int, label_filter: str, search_query: str, order_mode: str) -> Tuple[List[ModItem], List[ModItem], int, int, Dict]:
+def mods_view(
+    cfg: Dict,
+    page: int,
+    label_filter: str,
+    search_query: str,
+    order_mode: str,
+    favorite_only: bool = False,
+) -> Tuple[List[ModItem], List[ModItem], int, int, Dict]:
     items_all = discover_mods(cfg)
     ensure_mod_records([m.name for m in items_all])
     items = filter_items_by_query(items_all, search_query)
@@ -164,6 +179,9 @@ def mods_view(cfg: Dict, page: int, label_filter: str, search_query: str, order_
     if label_filter:
         lf = label_filter.lower()
         items = [m for m in items if (labels.get(m.name) or "").lower() == lf]
+    if favorite_only:
+        favorites = load_favorites(cfg)
+        items = [m for m in items if m.name in favorites]
     reverse = order_mode.startswith("-")
     mode = order_mode[1:] if reverse else order_mode
     if mode in {"d", "default"}:
@@ -207,8 +225,25 @@ def remove_label_from_mods(label_name: str, targets: List[str]) -> str:
         return f"Label removed: {label_name} -> {', '.join(removed)}"
     return "Label not found."
 
-def deactivate_mods_page(cfg: Dict, page: int, label_filter: str, search_query: str, order_mode: str) -> Tuple[int, int]:
-    _items, shown, target_page, _pages, _labels = mods_view(cfg, page, label_filter, search_query, order_mode)
+def add_favorites_to_mods(cfg: Dict, targets: List[str]) -> str:
+    update_favorites(cfg, targets, True)
+    return f"Favorites added: {', '.join(targets)}"
+
+def remove_favorites_from_mods(cfg: Dict, targets: List[str]) -> str:
+    update_favorites(cfg, targets, False)
+    return f"Favorites removed: {', '.join(targets)}"
+
+def deactivate_mods_page(
+    cfg: Dict,
+    page: int,
+    label_filter: str,
+    search_query: str,
+    order_mode: str,
+    favorite_only: bool = False,
+) -> Tuple[int, int]:
+    _items, shown, target_page, _pages, _labels = mods_view(
+        cfg, page, label_filter, search_query, order_mode, favorite_only
+    )
     count = 0
     removed_names = []
     for m in shown:
@@ -221,8 +256,17 @@ def deactivate_mods_page(cfg: Dict, page: int, label_filter: str, search_query: 
         mark_mods_managed(removed_names, "uninstalled")
     return target_page, count
 
-def apply_mods_page(cfg: Dict, page: int, label_filter: str, search_query: str, order_mode: str) -> Tuple[int, int, int]:
-    _items, shown, target_page, _pages, _labels = mods_view(cfg, page, label_filter, search_query, order_mode)
+def apply_mods_page(
+    cfg: Dict,
+    page: int,
+    label_filter: str,
+    search_query: str,
+    order_mode: str,
+    favorite_only: bool = False,
+) -> Tuple[int, int, int]:
+    _items, shown, target_page, _pages, _labels = mods_view(
+        cfg, page, label_filter, search_query, order_mode, favorite_only
+    )
     to_install = [m for m in shown if not m.installed]
     total = len(to_install)
     err = 0

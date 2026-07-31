@@ -84,6 +84,9 @@ def build_stylesheet(palette: Palette) -> str:
             border: 0;
             width: {tokens.COMBO_ARROW_WIDTH}px;
         }}
+        QComboBox::down-arrow {{
+            image: none;
+        }}
         QComboBox QAbstractItemView {{
             background: {palette.combo_list};
             border: {tokens.BORDER_WIDTH}px solid {palette.combo_list_border};
@@ -122,5 +125,14 @@ def build_stylesheet(palette: Palette) -> str:
         }}
         QMenu::item:selected {{
             background: {palette.menu_selected};
+        }}
+        QAbstractItemView {{
+            outline: 0;
+        }}
+        QTableView::item:selected {{
+            background-color: {palette.accent};
+            color: {palette.accent_text};
+            border: none;
+            outline: none;
         }}
     """

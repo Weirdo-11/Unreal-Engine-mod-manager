@@ -9,7 +9,7 @@ if qt_available():
 
     from mod_manager.ui import icons
     from mod_manager.ui.theme import colors, tokens
-    from mod_manager.ui.widgets import IconToolbar, icon_button, page_text, text_button
+    from mod_manager.ui.widgets import IconToolbar, PageControl, SelectBox, page_text, select_box, icon_button, text_button
     from mod_manager.ui.widgets.style_utils import ACRYLIC, TOOLBAR_SECTION, VARIANT_PROPERTY, apply_margins, clear_layout
 
 SECTIONS = (
@@ -62,7 +62,7 @@ class ButtonTest(unittest.TestCase):
         self.assertFalse(button.icon().isNull())
 
     def test_every_named_icon_resolves(self):
-        for name in icons.STANDARD_ICONS:
+        for name in set(icons.STANDARD_ICONS) | icons.CUSTOM_ICONS:
             self.assertFalse(icons.standard_icon(name).isNull(), name)
 
 
@@ -153,9 +153,43 @@ class LayoutHelperTest(unittest.TestCase):
         self.assertEqual(layout.count(), 0)
 
 
+@unittest.skipUnless(qt_available(), "PySide6 is not installed")
 class PagerTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = qt_app()
+
     def test_page_text_is_formatted_once(self):
         self.assertEqual(page_text(2, 7), "Page 2/7")
+
+    def test_page_control_emits_valid_page_requests(self):
+        control = PageControl()
+        requested = []
+        control.pageRequested.connect(requested.append)
+        control.set_page(2, 7)
+        control.input.setText("5")
+        control.input.returnPressed.emit()
+        self.assertEqual(requested, [5])
+        self.assertEqual(control.text(), "Page 2/7")
+
+    def test_page_control_rejects_out_of_range_values(self):
+        control = PageControl()
+        control.set_page(2, 4)
+        control.input.setText("9")
+        control.input.returnPressed.emit()
+        self.assertEqual(control.input.text(), "2")
+
+
+@unittest.skipUnless(qt_available(), "PySide6 is not installed")
+class SelectBoxTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = qt_app()
+
+    def test_select_factory_returns_chevron_painted_combo(self):
+        box = select_box(editable=True)
+        self.assertIsInstance(box, SelectBox)
+        self.assertTrue(box.isEditable())
 
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
@@ -177,6 +211,12 @@ class PaintedIconTest(unittest.TestCase):
         ascending = icons.sort_direction_icon(False, "#ffffff").pixmap(tokens.ICON_SIZE).toImage()
         descending = icons.sort_direction_icon(True, "#ffffff").pixmap(tokens.ICON_SIZE).toImage()
         self.assertNotEqual(ascending, descending)
+
+    def test_semantic_action_icons_are_distinct(self):
+        names = ("settings", "delete", "broken", "submit", "edit", "filter_apply", "filter_clear")
+        images = [icons.standard_icon(name).pixmap(tokens.ICON_SIZE).toImage() for name in names]
+        for index, image in enumerate(images):
+            self.assertNotIn(image, images[:index], names[index])
 
     def test_state_icons_use_the_palette_state_colors(self):
         palette = colors.build_palette("dark")

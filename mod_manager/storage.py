@@ -9,6 +9,8 @@ from typing import Dict, List
 from app_paths import CONFIG_PATH, PRESETS_PATH, LABELS_PATH, PROFILE_DATA_DIR, DEFAULT_CONFIG
 
 GAME_PROFILE_KEYS = ("game_mods_dir", "mods_source_dir", "mod_extensions", "mod_recursive_scan", "link_prefix")
+FAVORITES_KEY = "__favorites__"
+DEFAULT_FAVORITE_SCOPE = "__default__"
 
 def load_json(path: Path, default):
     if not path.exists():
@@ -185,6 +187,8 @@ def _merge_legacy_records(profile_data, legacy_data):
     merged = dict(profile_data)
     changed = False
     for name, legacy_value in legacy_data.items():
+        if name == FAVORITES_KEY:
+            continue
         current = merged.get(name)
         if current is None:
             merged[name] = legacy_value
@@ -205,6 +209,11 @@ def _merge_legacy_records(profile_data, legacy_data):
             changed = True
     return merged if changed else profile_data
 
+def _mod_record_data(base_path: Path, data):
+    if base_path != LABELS_PATH or not isinstance(data, dict):
+        return data
+    return {name: value for name, value in data.items() if name != FAVORITES_KEY}
+
 def _load_profile_json(base_path: Path, default):
     path, profile, cfg = _active_profile_context(base_path)
     if path == base_path:
@@ -212,13 +221,13 @@ def _load_profile_json(base_path: Path, default):
     is_legacy_profile = base_path.exists() and _is_first_profile(profile, cfg)
     if not path.exists():
         if is_legacy_profile:
-            data = load_json(base_path, default)
+            data = _mod_record_data(base_path, load_json(base_path, default))
             save_json(path, data)
             return data
         return load_json(path, default)
     data = load_json(path, default)
     if is_legacy_profile:
-        merged = _merge_legacy_records(data, load_json(base_path, default))
+        merged = _merge_legacy_records(data, _mod_record_data(base_path, load_json(base_path, default)))
         if merged is not data:
             save_json(path, merged)
             return merged
@@ -261,13 +270,13 @@ def save_labels(labels: Dict[str, str]) -> None:
                 "last_managed": rec.get("last_managed"),
                 "state": rec.get("state", "undefined"),
             }
-    save_json(_active_profile_data_path(LABELS_PATH), data)
+    _save_mod_record_data(data)
 
 def _now() -> str:
     return datetime.now().replace(microsecond=0).isoformat(sep=" ")
 
 def load_mod_records() -> Dict[str, Dict]:
-    raw = _load_profile_json(LABELS_PATH, {})
+    raw = _mod_record_data(LABELS_PATH, _load_profile_json(LABELS_PATH, {}))
     data = {}
     changed = False
     for name, value in raw.items():
@@ -289,7 +298,50 @@ def load_mod_records() -> Dict[str, Dict]:
     return data
 
 def save_mod_records(records: Dict[str, Dict]) -> None:
-    save_json(_active_profile_data_path(LABELS_PATH), records)
+    _save_mod_record_data(records)
+
+def _save_mod_record_data(records: Dict[str, Dict]) -> None:
+    path = _active_profile_data_path(LABELS_PATH)
+    data = dict(records)
+    if path == LABELS_PATH:
+        current = load_json(LABELS_PATH, {})
+        favorites = current.get(FAVORITES_KEY) if isinstance(current, dict) else None
+        if isinstance(favorites, dict) and favorites:
+            data[FAVORITES_KEY] = favorites
+    save_json(path, data)
+
+def _favorite_scope(cfg: Dict) -> str:
+    return str(cfg.get("active_game_profile_id") or DEFAULT_FAVORITE_SCOPE)
+
+def load_favorites(cfg: Dict) -> set[str]:
+    data = load_json(LABELS_PATH, {})
+    favorites = data.get(FAVORITES_KEY, {}) if isinstance(data, dict) else {}
+    values = favorites.get(_favorite_scope(cfg), []) if isinstance(favorites, dict) else []
+    return {str(name) for name in values if str(name)}
+
+def update_favorites(cfg: Dict, names: List[str], favorite: bool) -> set[str]:
+    data = load_json(LABELS_PATH, {})
+    if not isinstance(data, dict):
+        data = {}
+    favorite_map = data.get(FAVORITES_KEY, {})
+    if not isinstance(favorite_map, dict):
+        favorite_map = {}
+    else:
+        favorite_map = dict(favorite_map)
+    scope = _favorite_scope(cfg)
+    selected = {str(name) for name in favorite_map.get(scope, []) if str(name)}
+    targets = {str(name) for name in names if str(name)}
+    selected = selected | targets if favorite else selected - targets
+    if selected:
+        favorite_map[scope] = sorted(selected, key=str.lower)
+    else:
+        favorite_map.pop(scope, None)
+    if favorite_map:
+        data[FAVORITES_KEY] = favorite_map
+    else:
+        data.pop(FAVORITES_KEY, None)
+    save_json(LABELS_PATH, data)
+    return selected
 
 def mark_mods_managed(names: List[str], state: str) -> None:
     records = load_mod_records()

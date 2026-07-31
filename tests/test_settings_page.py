@@ -13,6 +13,9 @@ from mod_manager import settings_schema as schema
 if qt_available():
     from PySide6 import QtGui, QtWidgets
 
+    from mod_manager.ui.theme import tokens
+    from mod_manager.ui.widgets.style_utils import TOOLBAR_SECTION
+
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
 class SettingsFormTest(WindowTestCase):
@@ -36,13 +39,47 @@ class SettingsFormTest(WindowTestCase):
             self.assertEqual(self.form.labels[spec.key].toolTip(), spec.tooltip, spec.key)
 
     def test_sections_are_rendered_in_schema_order(self):
-        headings = [
-            self.form.layout.itemAt(row, QtWidgets.QFormLayout.SpanningRole).widget().text()
-            for row in range(self.form.layout.rowCount())
-            if self.form.layout.itemAt(row, QtWidgets.QFormLayout.SpanningRole) is not None
-        ]
-        for title, _specs in schema.SETTINGS_SECTIONS:
-            self.assertIn(title, headings)
+        self.assertEqual(list(self.form.sections), [title for title, _specs in schema.SETTINGS_SECTIONS])
+        for section in self.form.sections.values():
+            self.assertEqual(section.property("variant"), TOOLBAR_SECTION)
+
+    def test_compact_fields_use_token_widths(self):
+        self.assertEqual(self.form.fields["page_size"].width(), tokens.FORM_SHORT_FIELD_WIDTH)
+        self.assertLessEqual(self.form.fields["gui_theme"].maximumWidth(), tokens.FORM_MEDIUM_FIELD_WIDTH)
+        self.assertEqual(
+            self.form.fields["mods_source_dir"].sizePolicy().horizontalPolicy(),
+            QtWidgets.QSizePolicy.Expanding,
+        )
+
+    def test_numeric_fields_share_rows_in_pairs(self):
+        expected_pairs = (
+            ("page_size", "max_mod_name_len"),
+            ("max_preset_name_len", "max_label_name_len"),
+            ("gui_font_size", "ui_scale_percent"),
+            ("tile_size", "placeholder_image_col_width"),
+        )
+        for first, second in expected_pairs:
+            self.assertIs(self.form.rows[first], self.form.rows[second], (first, second))
+
+    def test_compact_fields_align_left_with_other_inputs(self):
+        section = self.form.sections["Appearance"]
+        theme_x = self.form.fields["gui_theme"].mapTo(section, self.form.fields["gui_theme"].rect().topLeft()).x()
+        font_size = self.form.fields["gui_font_size"]
+        scale = self.form.fields["ui_scale_percent"]
+        font_size_pos = font_size.mapTo(section, font_size.rect().topLeft())
+        scale_pos = scale.mapTo(section, scale.rect().topLeft())
+        self.assertEqual(font_size_pos.x(), theme_x)
+        self.assertEqual(font_size_pos.y(), scale_pos.y())
+        self.assertGreater(scale_pos.x(), font_size_pos.x() + font_size.width())
+
+    def test_font_preview_changes_without_changing_application_font(self):
+        before = QtWidgets.QApplication.instance().font()
+        self.form.fields["gui_font_size"].setText("17")
+        font_widget = self.form.fields["gui_font_family"]
+        if font_widget.count() > 1:
+            font_widget.setCurrentIndex(1)
+        self.assertEqual(self.window.settings.font_preview.font().pointSize(), 17)
+        self.assertEqual(QtWidgets.QApplication.instance().font(), before)
 
     def test_per_game_paths_are_visible_settings(self):
         for key in ("mods_source_dir", "game_mods_dir", "mod_extensions", "mod_recursive_scan", "link_prefix"):
@@ -177,6 +214,15 @@ class SettingsSaveTest(WindowTestCase):
             self.window._save_settings()
 
         self.assertEqual(self.window.mods_table.horizontalHeader().sectionSize(0), 96)
+
+    def test_saved_font_applies_to_existing_widgets_without_restart(self):
+        self.window.settings_form.fields["gui_font_size"].setText("17")
+
+        with patch("mod_manager.storage.save_config"):
+            self.window._save_settings()
+
+        self.assertEqual(QtWidgets.QApplication.instance().font().pointSize(), 17)
+        self.assertEqual(self.window.search_box.font().pointSize(), 17)
 
 
 if __name__ == "__main__":

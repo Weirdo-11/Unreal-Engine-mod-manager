@@ -20,6 +20,7 @@ class ModTableModel(QtCore.QAbstractTableModel):
         self.mods: list[ModItem] = []
         self.labels: dict[str, str] = {}
         self.records: dict[str, dict] = {}
+        self.favorites: set[str] = set()
         self.set_accent(accent_color or colors.FALLBACK_ACCENT)
 
     def set_accent(self, accent_color) -> None:
@@ -30,11 +31,12 @@ class ModTableModel(QtCore.QAbstractTableModel):
         self.set_accent(accent_color)
         self.layoutChanged.emit()
 
-    def set_data(self, mods: list[ModItem], labels: dict, records: dict) -> None:
+    def set_data(self, mods: list[ModItem], labels: dict, records: dict, favorites: set[str] | None = None) -> None:
         self.beginResetModel()
         self.mods = list(mods)
         self.labels = dict(labels or {})
         self.records = dict(records or {})
+        self.favorites = set(favorites or ())
         self.endResetModel()
 
     def rowCount(self, parent=QtCore.QModelIndex()) -> int:

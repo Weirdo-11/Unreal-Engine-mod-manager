@@ -3,8 +3,10 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from mod_manager.mods import discover_mods, import_mod_image, is_mod_file, mod_image_path, parse_extensions
+from mod_manager.models import ModItem
+from mod_manager.mods import discover_mods, import_mod_image, is_mod_file, mod_image_path, mods_view, parse_extensions
 
 
 class ParseExtensionsTests(unittest.TestCase):
@@ -137,6 +139,36 @@ class DiscoverModsTests(unittest.TestCase):
 
         cfg_with_folders = self._cfg(mod_extensions=".pak,folders")
         self.assertTrue(is_mod_file(folder, cfg_with_folders))
+
+
+class ModsViewFavoriteTests(unittest.TestCase):
+    def test_search_label_and_favorite_filters_are_combined(self):
+        root = Path(tempfile.gettempdir())
+        items = [
+            ModItem("combat-favorite.pak", root / "a", root / "da", False, False),
+            ModItem("combat-normal.pak", root / "b", root / "db", False, False),
+            ModItem("ui-favorite.pak", root / "c", root / "dc", False, False),
+        ]
+        cfg = {"page_size": 10, "active_game_profile_id": "game", "link_prefix": ""}
+        labels = {
+            "combat-favorite.pak": "combat",
+            "combat-normal.pak": "combat",
+            "ui-favorite.pak": "ui",
+        }
+
+        with patch("mod_manager.mods.discover_mods", return_value=items), patch(
+            "mod_manager.mods.ensure_mod_records"
+        ), patch("mod_manager.mods.load_labels", return_value=labels), patch(
+            "mod_manager.mods.load_mod_records", return_value={}
+        ), patch("mod_manager.mods.load_favorites", return_value={"combat-favorite.pak", "ui-favorite.pak"}):
+            filtered, shown, page, pages, returned_labels = mods_view(
+                cfg, 1, "combat", "pak", "name", True
+            )
+
+        self.assertEqual([mod.name for mod in filtered], ["combat-favorite.pak"])
+        self.assertEqual(shown, filtered)
+        self.assertEqual((page, pages), (1, 1))
+        self.assertEqual(returned_labels, labels)
 
 
 if __name__ == "__main__":

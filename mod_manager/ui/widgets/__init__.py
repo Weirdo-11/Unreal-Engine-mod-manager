@@ -5,8 +5,9 @@ from .completer import attach_completer, complete, configure_completer, configur
 from .detail_view import DetailImageLabel, DetailPanel, action_button, detail_name_label, path_button
 from .drop_target import QtWindowsDropTarget, dropped_paths, has_urls
 from .form import FormBuilder, read_field, system_font_families, write_field
-from .pager import PageLabel, page_text
-from .section import heading_label, muted_label, page_title_label, section_title_label
+from .pager import PageControl, PageLabel, page_text
+from .select import SelectBox, select_box
+from .section import heading_label, muted_label, page_title_label, refresh_page_title, section_title_label
 from .style_utils import apply_margins, clear_layout, expanding_size_policy, fixed_size_policy, repolish, set_variant
 from .toolbar import IconToolbar, ToolbarSection
 
@@ -16,6 +17,7 @@ __all__ = [
     "FormBuilder",
     "IconToolbar",
     "PageLabel",
+    "PageControl",
     "QtWindowsDropTarget",
     "ToolbarSection",
     "action_button",
@@ -39,7 +41,10 @@ __all__ = [
     "path_button",
     "read_field",
     "repolish",
+    "refresh_page_title",
     "section_title_label",
+    "SelectBox",
+    "select_box",
     "set_variant",
     "system_font_families",
     "text_button",

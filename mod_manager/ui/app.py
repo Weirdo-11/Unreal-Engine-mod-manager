@@ -6,12 +6,13 @@ from typing import Callable, List
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from app_paths import APP_NAME, APP_VERSION, DEFAULT_CONFIG
+from app_paths import APP_NAME, APP_VERSION
 
 from ..cli_utils import ensure_paths, open_folder, select_in_explorer
 from ..dragdrop import read_clipboard_image, read_clipboard_paths
 from ..models import ModItem
 from ..mods import (
+    add_favorites_to_mods,
     add_label_to_mods,
     apply_mods_page,
     deactivate_mod,
@@ -26,6 +27,7 @@ from ..mods import (
     mods_records,
     mods_view,
     remove_label_from_mods,
+    remove_favorites_from_mods,
     toggle_mods_by_indexes,
 )
 from ..presets import (
@@ -38,6 +40,7 @@ from ..presets import (
 from ..storage import (
     active_game_profile,
     load_config,
+    load_favorites,
     normalize_game_profiles,
     save_config,
 )
@@ -63,6 +66,7 @@ from .pages.toolbar_specs import (
 )
 from .models import (
     BrokenTableModel,
+    FavoriteDelegate,
     ModListView,
     ModTableModel,
     PresetTableModel,
@@ -75,7 +79,7 @@ from .theme.manager import ThemeManager
 from .widgets import (
     DetailImageLabel,
     IconToolbar,
-    PageLabel,
+    PageControl,
     QtWindowsDropTarget,
     apply_margins,
     attach_completer,
@@ -89,10 +93,9 @@ from .widgets import (
     fixed_size_policy,
     icon_button,
     owns_event_source,
-    page_text,
     path_button,
-    set_variant,
-    system_font_families,
+    refresh_page_title,
+    select_box,
     text_button,
 )
 from .view_modes import (
@@ -104,7 +107,7 @@ from .view_modes import (
     order_mode,
     sort_key_for_column,
 )
-from ..workers import _run_import_batch, _run_save_settings
+from ..workers import _run_import_batch
 
 
 class _Var:
@@ -161,6 +164,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.preset_page = _Var(1)
         self.search_var = _Var("")
         self.label_filter_var = _Var("")
+        self.favorite_filter_var = _Var(False)
         self.label_edit_var = _Var("")
         self.order_var = _Var(self._mod_order_label_from_config())
         self.mod_view_mode = _Var(normalize_view_mode(self.cfg.get("mod_view_mode")))
@@ -169,6 +173,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.current_mods_shown: list[ModItem] = []
         self.current_mod_labels: dict[str, str] = {}
         self.current_mod_records: dict[str, dict] = {}
+        self.current_mod_favorites: set[str] = set()
         self.current_broken: list[ModItem] = []
         self.mod_sort_key = MOD_ORDER_OPTIONS.get(self.order_var.get(), normalize_sort_key(self.cfg.get("mod_sort_key")))
         self.mod_sort_reverse = bool(self.cfg.get("mod_sort_reverse", False))
@@ -259,13 +264,24 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.mods_model.refresh_accent(palette.accent)
             self.presets_model.set_palette(palette)
             self.tile_delegate.set_palette(palette)
+            self.favorite_delegate.set_favorites(self.current_mod_favorites)
             self.tiles_view.viewport().update()
+            for button in self.action_widgets:
+                if isinstance(button, QtWidgets.QAbstractButton):
+                    icon_name = button.property("iconName")
+                    if icon_name:
+                        button.setIcon(self._icon(icon_name))
+            for label in self.findChildren(QtWidgets.QLabel):
+                if label.property("pageTitle"):
+                    refresh_page_title(label)
             self._update_mod_order_direction_button()
             if hasattr(self, "_settings_form"):
                 self._update_theme_preview()
+                self.settings.update_font_preview()
             for dialog in self._dialogs():
                 dialog.setPalette(self.palette())
                 dialog.update()
+            self._refresh_selected_detail()
             self.update()
         finally:
             self._applying_theme = False
@@ -374,7 +390,6 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.setCentralWidget(self.mods_tab)
         self.statusBar().showMessage("")
         self._apply_button_style()
-        self._build_menu()
         self._build_games_page()
         self._build_mods()
         self._build_presets()
@@ -385,21 +400,6 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _apply_button_style(self) -> None:
         self._theme_stylesheet = self.theme.stylesheet
         self.setStyleSheet(self._theme_stylesheet)
-
-    def _build_menu(self) -> None:
-        manage = self.menuBar().addMenu("Manage")
-        games = manage.addAction(self._icon("menu"), "Games")
-        games.setToolTip("Manage game profiles")
-        games.triggered.connect(self._open_games_dialog)
-        presets = manage.addAction(self._icon("save"), "Presets")
-        presets.setToolTip("Open presets")
-        presets.triggered.connect(self._open_presets_dialog)
-        settings = manage.addAction(self._icon("open"), "Settings")
-        settings.setToolTip("Open settings")
-        settings.triggered.connect(self._open_settings_dialog)
-        broken = manage.addAction(self._icon("delete"), "Broken links")
-        broken.setToolTip("Open broken links cleanup")
-        broken.triggered.connect(self._open_broken_dialog)
 
     def _build_games_page(self) -> None:
         self.games = GamesController(self, self.games_page)
@@ -505,8 +505,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         return order_label_from_config(self.cfg)
 
     def _filter_box(self, placeholder: str) -> QtWidgets.QComboBox:
-        box = QtWidgets.QComboBox()
-        box.setEditable(True)
+        box = select_box(editable=True)
         box.lineEdit().setPlaceholderText(placeholder)
         box.lineEdit().returnPressed.connect(self._mods_search)
         return configure_filter_box(box)
@@ -526,8 +525,10 @@ class ModManagerGui(QtWidgets.QMainWindow):
         filter_section = toolbar.sections["filter"]
         filter_section.add_widget(self.search_box, 2)
         filter_section.add_widget(self.label_filter_box, 1)
+        self.favorite_filter_button = toolbar.button("favorite_filter")
+        self.favorite_filter_button.setCheckable(True)
 
-        self.order_box = QtWidgets.QComboBox()
+        self.order_box = select_box()
         self.order_box.addItems(list(MOD_ORDER_OPTIONS))
         self.order_box.setCurrentText(order_label_for_key(self.mod_sort_key))
         self.order_box.activated.connect(self._activate_mod_order)
@@ -548,6 +549,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             "games": self._open_games_dialog,
             "search": self._mods_search,
             "clear": self._mods_clear,
+            "favorite_filter": self._toggle_favorite_filter,
             "view_list": lambda: self._set_view_mode("list"),
             "view_tiles": lambda: self._set_view_mode("tiles"),
             "presets": self._open_presets_dialog,
@@ -565,7 +567,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
         page_section = toolbar.sections["page"]
         page_section.add_action("prev_page", "back", "Previous mods page", lambda: self._change_mod_page(-1))
-        self.page_label = page_section.add_widget(PageLabel())
+        self.page_control = page_section.add_widget(PageControl())
+        self.page_control.pageRequested.connect(self._set_mod_page)
+        self.page_label = self.page_control
         page_section.add_action("next_page", "forward", "Next mods page", lambda: self._change_mod_page(1))
 
         self.label_edit = QtWidgets.QLineEdit()
@@ -587,6 +591,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             "toggle_selected": self._toggle_selected_mods,
             "add_label": self._add_label_selected,
             "remove_label": self._remove_label_selected,
+            "favorite_selected": self._toggle_favorite_selected,
             "import_files": self._import_mod_files,
             "import_folder": self._import_mod_folder,
             "set_image": self._set_mod_image,
@@ -615,6 +620,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.mods_table.setModel(self.mods_model)
         self.mods_table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.mods_table.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.mods_table.setMouseTracking(True)
         self.mods_table.setAcceptDrops(True)
         self.mods_table.viewport().setAcceptDrops(True)
         self.mods_table.viewport().installEventFilter(self)
@@ -625,6 +631,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         mods_header.sectionClicked.connect(self._sort_mods_by_section)
         self.mods_table.doubleClicked.connect(lambda _idx: self._toggle_selected_mods())
         self.mods_table.selectionModel().selectionChanged.connect(lambda _a, _b: self._on_mod_selection_changed())
+        self.favorite_delegate = FavoriteDelegate(self.mods_table)
+        self.favorite_delegate.favoriteToggled.connect(self._toggle_favorite_name)
+        self.mods_table.setItemDelegateForColumn(1, self.favorite_delegate)
 
         self.tile_delegate = TileDelegate(self.cfg, self.theme.palette, self)
         self.tiles_view = ModListView()
@@ -635,12 +644,14 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.tiles_view.setMovement(QtWidgets.QListView.Static)
         self.tiles_view.setUniformItemSizes(True)
         self.tiles_view.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
+        self.tiles_view.setMouseTracking(True)
         self.tiles_view.setAcceptDrops(True)
         self.tiles_view.viewport().setAcceptDrops(True)
         self.tiles_view.viewport().installEventFilter(self)
         self.tiles_view.zoomRequested.connect(self._zoom_tiles)
         self.tiles_view.doubleClicked.connect(lambda _idx: self._toggle_selected_mods())
         self.tiles_view.selectionModel().selectionChanged.connect(lambda _a, _b: self._on_mod_selection_changed())
+        self.tile_delegate.favoriteToggled.connect(self._toggle_favorite_name)
 
         self.detail_frame = QtWidgets.QWidget()
         self.detail_frame.setAutoFillBackground(True)
@@ -702,7 +713,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.presets_toolbar.build(PRESETS_TOOLBAR_SECTIONS)
         page_section = self.presets_toolbar.sections["page"]
         page_section.add_action("prev_page", "back", "Previous presets page", lambda: self._change_preset_page(-1))
-        self.preset_page_label = page_section.add_widget(PageLabel())
+        self.preset_page_control = page_section.add_widget(PageControl())
+        self.preset_page_control.pageRequested.connect(self._set_preset_page)
+        self.preset_page_label = self.preset_page_control
         page_section.add_action("next_page", "forward", "Next presets page", lambda: self._change_preset_page(1))
 
         self.preset_name = QtWidgets.QLineEdit()
@@ -1040,6 +1053,17 @@ class ModManagerGui(QtWidgets.QMainWindow):
         button.setEnabled(bool(value and value != "-"))
         self._detail_row_with_button("Label", button)
 
+    def _detail_favorite_row(self, mod: ModItem) -> None:
+        favorite = mod.name in self.current_mod_favorites
+        text = "Remove from favorites" if favorite else "Add to favorites"
+        button = text_button(
+            text,
+            text,
+            lambda name=mod.name: self._toggle_favorite_name(name),
+            icon_name="favorite_filled" if favorite else "favorite",
+        )
+        self._detail_row_with_button("Favorite", button)
+
     def _detail_state_action_row(self, mod: ModItem) -> None:
         action = "uninstall" if mod.installed else "install"
         index = self.current_mods_shown.index(mod) + 1 if mod in self.current_mods_shown else 1
@@ -1157,6 +1181,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             return
         self._detail_row("Name", mod.name)
         self._detail_label_row(self.current_mod_labels.get(mod.name, "-"))
+        self._detail_favorite_row(mod)
         self._detail_state_action_row(mod)
         self._detail_dates_row(mod)
         self._detail_path_row("Source", mod.src)
@@ -1180,17 +1205,24 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def refresh_mods(self, selected_names: List[str] | None = None) -> None:
         page, label_filter, search, order = self._view_args()
-        items, shown, page, pages, labels = mods_view(self.cfg, page, label_filter, search, order)
+        favorite_only = bool(self.favorite_filter_var.get())
+        view_args = (self.cfg, page, label_filter, search, order)
+        items, shown, page, pages, labels = (
+            mods_view(*view_args, True) if favorite_only else mods_view(*view_args)
+        )
         self.current_mod_items = items
         self.current_mods_shown = shown
         self.current_mod_labels = labels
         self.current_mod_records = mods_records()
+        self.current_mod_favorites = load_favorites(self.cfg)
         self.mod_page.set(page)
         list_blocker = QtCore.QSignalBlocker(self.mods_table.selectionModel())
         tile_blocker = QtCore.QSignalBlocker(self.tiles_view.selectionModel())
         try:
-            self.mods_model.set_data(shown, labels, self.current_mod_records)
-            self.page_label.setText(f"Page {page}/{pages}")
+            self.mods_model.set_data(shown, labels, self.current_mod_records, self.current_mod_favorites)
+            self.favorite_delegate.set_favorites(self.current_mod_favorites)
+            self.tile_delegate.set_favorites(self.current_mod_favorites)
+            self.page_control.set_page(page, pages)
             self.search_box.clear()
             self.search_box.addItems([m.name for m in items])
             self.search_box.setCurrentText(search)
@@ -1199,6 +1231,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.label_filter_box.addItems(label_values)
             self.label_filter_box.setCurrentText(label_filter)
             self.label_edit_model.setStringList(label_values)
+            self.favorite_filter_button.setChecked(favorite_only)
             self._select_mod_names(selected_names)
         finally:
             del tile_blocker
@@ -1219,7 +1252,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.presets_table.setUpdatesEnabled(False)
         try:
             self.presets_model.set_data(presets, page_keys, presets_records(), installed)
-            self.preset_page_label.setText(f"Page {page}/{pages}")
+            self.preset_page_control.set_page(page, pages)
             if selection:
                 selection.clearSelection()
                 for name in selected_names:
@@ -1243,11 +1276,37 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.mod_page.set(1)
         self.refresh_mods()
 
+    def _toggle_favorite_filter(self) -> None:
+        self.favorite_filter_var.set(self.favorite_filter_button.isChecked())
+        self.mod_page.set(1)
+        self.refresh_mods()
+
+    def _set_favorite_names(self, names: list[str], favorite: bool) -> None:
+        if not names:
+            return
+        message = (
+            add_favorites_to_mods(self.cfg, names)
+            if favorite
+            else remove_favorites_from_mods(self.cfg, names)
+        )
+        self._set_status(message)
+        self.refresh_mods(names)
+
+    def _toggle_favorite_name(self, name: str) -> None:
+        self._set_favorite_names([name], name not in self.current_mod_favorites)
+
+    def _toggle_favorite_selected(self) -> None:
+        names = self._selected_mod_names()
+        favorite = not all(name in self.current_mod_favorites for name in names)
+        self._set_favorite_names(names, favorite)
+
     def _mods_clear(self) -> None:
         self.search_var.set("")
         self.label_filter_var.set("")
         self.search_box.setCurrentText("")
         self.label_filter_box.setCurrentText("")
+        self.favorite_filter_var.set(False)
+        self.favorite_filter_button.setChecked(False)
         self.mod_page.set(1)
         self.refresh_mods()
 
@@ -1255,8 +1314,16 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.mod_page.set(max(1, int(self.mod_page.get()) + delta))
         self.refresh_mods()
 
+    def _set_mod_page(self, page: int) -> None:
+        self.mod_page.set(page)
+        self.refresh_mods()
+
     def _change_preset_page(self, delta: int) -> None:
         self.preset_page.set(max(1, int(self.preset_page.get()) + delta))
+        self.refresh_presets()
+
+    def _set_preset_page(self, page: int) -> None:
+        self.preset_page.set(page)
         self.refresh_presets()
 
     def _install_page(self) -> None:
@@ -1268,7 +1335,14 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.refresh_mods()
             self.refresh_presets()
 
-        self._run_action("Installing mods...", lambda: apply_mods_page(self.cfg, page, label_filter, search, order), done)
+        view_args = (self.cfg, page, label_filter, search, order)
+        self._run_action(
+            "Installing mods...",
+            lambda: apply_mods_page(*view_args, True)
+            if self.favorite_filter_var.get()
+            else apply_mods_page(*view_args),
+            done,
+        )
 
     def _uninstall_page(self) -> None:
         page, label_filter, search, order = self._view_args()
@@ -1279,7 +1353,14 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.refresh_mods()
             self.refresh_presets()
 
-        self._run_action("Uninstalling mods...", lambda: deactivate_mods_page(self.cfg, page, label_filter, search, order), done)
+        view_args = (self.cfg, page, label_filter, search, order)
+        self._run_action(
+            "Uninstalling mods...",
+            lambda: deactivate_mods_page(*view_args, True)
+            if self.favorite_filter_var.get()
+            else deactivate_mods_page(*view_args),
+            done,
+        )
 
     def _toggle_selected_mods(self) -> None:
         indexes = self._selected_indexes()
