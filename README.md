@@ -4,7 +4,7 @@ A symlink-based mod manager for Unreal Engine games. Manages mods as symbolic li
 
 ---
 
-![Mod Manager demo](assets/2026-07-07_031110.jpg)
+![Mod Manager demo](assets/2026-07-31_084946.jpg)
 
 ---
 
