@@ -8,7 +8,13 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from tests.qt_support import dispose, qt_app
+
 from mod_manager.models import ModItem
+from tests.window_fixture import FAKE_DEST as _FAKE_DEST
+from tests.window_fixture import FAKE_SRC as _FAKE_SRC
+from tests.window_fixture import base_config
+from mod_manager.ui.theme import tokens
 
 try:
     from PySide6 import QtCore, QtGui, QtWidgets
@@ -17,8 +23,6 @@ except ModuleNotFoundError:
     QtGui = None
     QtWidgets = None
 
-_FAKE_SRC = Path(tempfile.gettempdir()) / "mm_test_source"
-_FAKE_DEST = Path(tempfile.gettempdir()) / "mm_test_game"
 _FAKE_DROP = Path(tempfile.gettempdir()) / "mm_test_drop"
 _FAKE_NEW_DEST = Path(tempfile.gettempdir()) / "mm_test_new_game"
 
@@ -27,38 +31,10 @@ _FAKE_NEW_DEST = Path(tempfile.gettempdir()) / "mm_test_new_game"
 class GuiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.qt_app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+        cls.qt_app = qt_app()
 
     def setUp(self) -> None:
-        self.cfg = {
-            "mods_source_dir": str(_FAKE_SRC),
-            "game_mods_dir": str(_FAKE_DEST),
-            "mod_extensions": ".pak,.utoc",
-            "mod_recursive_scan": False,
-            "link_prefix": "",
-            "page_size": 10,
-            "max_mod_name_len": 28,
-            "max_preset_name_len": 28,
-            "max_label_name_len": 12,
-            "button_size_percent": 100,
-            "gui_theme": "system",
-            "gui_accent_color_mode": "system",
-            "gui_accent_color": "#2563eb",
-            "gui_text_color_mode": "system",
-            "gui_text_color": "#111827",
-            "gui_font_family": "",
-            "gui_font_size": 10,
-            "placeholder_image_col_width": 56,
-            "mod_view_mode": "list",
-            "tile_size": 140,
-            "window_width": 900,
-            "window_height": 600,
-            "order_var": "Default",
-            "mod_sort_key": "d",
-            "mod_sort_reverse": False,
-            "preset_sort_key": "name",
-            "preset_sort_reverse": False,
-        }
+        self.cfg = base_config()
         self.mods = [
             self.mod_item("combat.pak", installed=True),
             self.mod_item("ui.pak", installed=False),
@@ -66,35 +42,36 @@ class GuiTests(unittest.TestCase):
         self.presets = {"core": ["combat.pak"], "ui": ["ui.pak"]}
         self.broken = [self.mod_item("missing.pak", installed=True)]
         self.patchers = [
-            patch("mod_manager.gui.load_config", return_value=self.cfg),
-            patch("mod_manager.gui.save_config"),
-            patch("mod_manager.gui.ensure_paths", return_value=True),
-            patch("mod_manager.gui.mod_image_path", return_value=None),
-            patch("mod_manager.gui.mods_view", return_value=(self.mods, self.mods, 1, 1, {"combat.pak": "combat"})),
+            # storage.save_config is imported lazily inside workers, so it must be patched at
+            # its source or a test would overwrite the real config.json next to the app.
+            patch("mod_manager.storage.save_config"),
+            patch("mod_manager.ui.app.load_config", return_value=self.cfg),
+            patch("mod_manager.ui.app.save_config"),
+            patch("mod_manager.ui.app.ensure_paths", return_value=True),
+            patch("mod_manager.ui.app.mod_image_path", return_value=None),
+            patch("mod_manager.ui.app.mods_view", return_value=(self.mods, self.mods, 1, 1, {"combat.pak": "combat"})),
             patch(
-                "mod_manager.gui.mods_records",
+                "mod_manager.ui.app.mods_records",
                 return_value={"combat.pak": {"last_managed": "2026-01-01 10:00:00"}},
             ),
-            patch("mod_manager.gui.presets_view", return_value=(self.presets, list(self.presets), ["core", "ui"], 1, 1)),
+            patch("mod_manager.ui.app.presets_view", return_value=(self.presets, list(self.presets), ["core", "ui"], 1, 1)),
             patch(
-                "mod_manager.gui.presets_records",
+                "mod_manager.ui.app.presets_records",
                 return_value={"core": {"state": "applied", "last_managed": "2026-01-02 10:00:00"}},
             ),
-            patch("mod_manager.gui.list_installed_mods", return_value=[self.mods[0]]),
-            patch("mod_manager.gui.list_broken_links", return_value=self.broken),
+            patch("mod_manager.ui.app.list_installed_mods", return_value=[self.mods[0]]),
+            patch("mod_manager.ui.app.list_broken_links", return_value=self.broken),
         ]
         for patcher in self.patchers:
             patcher.start()
-        from mod_manager.gui import ModManagerGui
+        from mod_manager.ui.app import ModManagerGui
 
         self.window = ModManagerGui()
         self.window.hide()
         self.qt_app.processEvents()
 
     def tearDown(self) -> None:
-        self.window.close()
-        self.window.deleteLater()
-        self.qt_app.processEvents()
+        dispose(self.window)
         for patcher in reversed(self.patchers):
             patcher.stop()
 
@@ -156,19 +133,24 @@ class GuiTests(unittest.TestCase):
         header = self.window.mods_table.horizontalHeader()
 
         self.assertFalse(header.stretchLastSection())
-        self.assertEqual(header.sectionResizeMode(0), QtWidgets.QHeaderView.ResizeToContents)
+        self.assertEqual(header.sectionResizeMode(0), QtWidgets.QHeaderView.Fixed)
         self.assertEqual(header.sectionResizeMode(1), QtWidgets.QHeaderView.Stretch)
         self.assertEqual(header.sectionResizeMode(2), QtWidgets.QHeaderView.ResizeToContents)
         self.assertEqual(header.sectionResizeMode(3), QtWidgets.QHeaderView.ResizeToContents)
         self.assertTrue(header.sectionsClickable())
 
-    def test_manage_menu_opens_secondary_dialogs(self):
-        menu_titles = [action.text() for action in self.window.menuBar().actions()]
-        self.assertIn("Manage", menu_titles)
-        self.assertEqual(self.window.manage_button.text(), "Menu")
-        self.assertIsNotNone(self.window.manage_button.menu())
-        self.assertFalse(self.window.manage_button.icon().isNull())
-        self.assertEqual([action.text() for action in self.window.manage_button.menu().actions()], ["Presets", "Settings", "Broken links"])
+    def test_state_column_uses_the_configured_width(self):
+        header = self.window.mods_table.horizontalHeader()
+
+        self.assertEqual(header.sectionSize(0), self.cfg["placeholder_image_col_width"])
+
+    def test_manage_section_opens_secondary_dialogs(self):
+        manage = self.window.mods_toolbar.sections["manage"]
+        self.assertEqual(manage.title, "Manage")
+        self.assertEqual(
+            [button.accessibleName() for button in manage.widgets()],
+            ["Open presets", "Open settings", "Open broken links cleanup"],
+        )
 
         self.window._open_presets_dialog()
         self.assertTrue(self.window.presets_dialog.isVisible())
@@ -266,7 +248,7 @@ class GuiTests(unittest.TestCase):
         refresh_mods.assert_called_once_with()
 
     def test_order_control_restores_default_and_created_date_modes(self):
-        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.gui.save_config") as save_config:
+        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.ui.app.save_config") as save_config:
             self.window._set_mod_order("Created date")
 
         self.assertEqual(self.window.order_var.get(), "Created date")
@@ -279,7 +261,7 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(self.window._view_args()[3], "default")
 
-        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.gui.save_config"):
+        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.ui.app.save_config"):
             self.window._sort_mods_by_section(2)
 
         self.assertEqual(self.window.mod_sort_key, "label")
@@ -287,12 +269,12 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window._view_args()[3], "label")
         refresh_mods.assert_called_once_with()
 
-        with patch.object(self.window, "refresh_mods"), patch("mod_manager.gui.save_config"):
+        with patch.object(self.window, "refresh_mods"), patch("mod_manager.ui.app.save_config"):
             self.window._toggle_mod_order_direction()
 
         self.assertEqual(self.window._view_args()[3], "-label")
 
-        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.gui.save_config"):
+        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.ui.app.save_config"):
             self.window._sort_mods_by_section(2)
 
         self.assertEqual(self.window._view_args()[3], "label")
@@ -301,41 +283,41 @@ class GuiTests(unittest.TestCase):
         self.window.order_box.setCurrentText("Default")
         self.window.mod_sort_key = "default"
         self.window.mod_sort_reverse = True
-        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.gui.save_config"):
+        with patch.object(self.window, "refresh_mods") as refresh_mods, patch("mod_manager.ui.app.save_config"):
             self.window._activate_mod_order(self.window.order_box.currentIndex())
 
         self.assertEqual(self.window._view_args()[3], "default")
         refresh_mods.assert_called_once_with()
 
     def test_clicking_same_sort_column_twice_toggles_direction(self):
-        with patch.object(self.window, "refresh_mods"), patch("mod_manager.gui.save_config"):
+        with patch.object(self.window, "refresh_mods"), patch("mod_manager.ui.app.save_config"):
             self.window._sort_mods_by_section(1)
 
         self.assertEqual(self.window._view_args()[3], "name")
 
-        with patch.object(self.window, "refresh_mods"), patch("mod_manager.gui.save_config"):
+        with patch.object(self.window, "refresh_mods"), patch("mod_manager.ui.app.save_config"):
             self.window._sort_mods_by_section(1)
 
         self.assertEqual(self.window._view_args()[3], "-name")
 
-        with patch.object(self.window, "refresh_mods"), patch("mod_manager.gui.save_config"):
+        with patch.object(self.window, "refresh_mods"), patch("mod_manager.ui.app.save_config"):
             self.window._sort_mods_by_section(1)
 
         self.assertEqual(self.window._view_args()[3], "name")
 
     def test_selecting_same_order_option_twice_toggles_direction(self):
-        with patch.object(self.window, "refresh_mods"), patch("mod_manager.gui.save_config"):
+        with patch.object(self.window, "refresh_mods"), patch("mod_manager.ui.app.save_config"):
             self.window._set_mod_order("Name")
 
         self.assertEqual(self.window._view_args()[3], "name")
 
-        with patch.object(self.window, "refresh_mods"), patch("mod_manager.gui.save_config"):
+        with patch.object(self.window, "refresh_mods"), patch("mod_manager.ui.app.save_config"):
             self.window._set_mod_order("Name")
 
         self.assertEqual(self.window._view_args()[3], "-name")
 
     def test_tile_view_uses_same_model_and_label_button_toggles_filter(self):
-        with patch("mod_manager.gui.save_config") as save_config:
+        with patch("mod_manager.ui.app.save_config") as save_config:
             self.window._set_view_mode("tiles")
 
         self.assertEqual(self.window.mods_stack.currentWidget(), self.window.tile_splitter)
@@ -495,7 +477,7 @@ class GuiTests(unittest.TestCase):
         self.window._set_view_mode("tiles")
         self.window.cfg["tile_size"] = 140
 
-        with patch("mod_manager.gui.save_config") as save_config:
+        with patch("mod_manager.ui.app.save_config") as save_config:
             result = self.window._zoom_tiles(1)
 
         self.assertEqual(result, "break")
@@ -508,25 +490,25 @@ class GuiTests(unittest.TestCase):
         self.window.search_var.set("pak")
         self.window.label_filter_var.set("combat")
 
-        with patch("mod_manager.gui.apply_mods_page", return_value=(2, 3, 1)) as apply_mods, patch.object(
+        with patch("mod_manager.ui.app.apply_mods_page", return_value=(2, 3, 1)) as apply_mods, patch.object(
             self.window, "refresh_mods"
         ) as refresh_mods, patch.object(self.window, "refresh_presets") as refresh_presets:
             self.window._install_page()
 
         apply_mods.assert_called_once_with(self.window.cfg, 2, "combat", "pak", "default")
-        self.assertEqual(self.window.status_var.get(), "Installed 2/3 on page 2. Errors: 1.")
+        self.assertEqual(self.window.context.status_text, "Installed 2/3 on page 2. Errors: 1.")
         refresh_mods.assert_called_once_with()
         refresh_presets.assert_called_once_with()
 
         self.select_mod_rows(0, 1)
-        with patch("mod_manager.gui.toggle_mods_by_indexes", return_value="Toggled") as toggle_mods, patch.object(
+        with patch("mod_manager.ui.app.toggle_mods_by_indexes", return_value="Toggled") as toggle_mods, patch.object(
             self.window, "refresh_mods"
         ) as refresh_mods, patch.object(self.window, "refresh_presets"):
             self.window._toggle_selected_mods()
 
         toggle_mods.assert_called_once_with(self.mods, [1, 2])
         refresh_mods.assert_called_once_with(["combat.pak", "ui.pak"])
-        self.assertEqual(self.window.status_var.get(), "Toggled")
+        self.assertEqual(self.window.context.status_text, "Toggled")
 
     def test_mod_selection_buttons_are_enabled_only_with_selection(self):
         self.window.mods_table.selectionModel().clearSelection()
@@ -542,7 +524,7 @@ class GuiTests(unittest.TestCase):
         buttons = [widget for widget in self.window.detail_frame.findChildren(QtWidgets.QPushButton) if widget.text() in {str(self.mods[0].src), str(self.mods[0].dest)}]
         self.assertEqual(len(buttons), 2)
 
-        with patch("mod_manager.gui.select_in_explorer") as select_in_explorer:
+        with patch("mod_manager.ui.app.select_in_explorer") as select_in_explorer:
             buttons[0].click()
             buttons[1].click()
 
@@ -570,7 +552,7 @@ class GuiTests(unittest.TestCase):
         self.window.detail_scroll.resize(300, 500)
         self.qt_app.processEvents()
 
-        with patch("mod_manager.gui.mod_image_path", return_value=image_path):
+        with patch("mod_manager.ui.app.mod_image_path", return_value=image_path):
             self.window._refresh_mod_detail(self.mods[0])
 
         image_labels = [
@@ -639,10 +621,10 @@ class GuiTests(unittest.TestCase):
 
         self.assertGreaterEqual(len(icon_buttons), 10)
         for button in icon_buttons:
-            self.assertFalse(button.icon().isNull())
+            self.assertFalse(button.icon().isNull(), button.accessibleName())
             self.assertTrue(button.toolTip())
             self.assertTrue(button.accessibleName())
-            self.assertEqual(button.iconSize(), QtCore.QSize(18, 18))
+            self.assertEqual(button.iconSize(), QtCore.QSize(tokens.ICON_SIZE, tokens.ICON_SIZE))
             self.assertEqual(button.property("variant"), "acrylic")
 
         self.assertEqual(self.window.order_direction_button.property("variant"), "acrylic")
@@ -652,9 +634,10 @@ class GuiTests(unittest.TestCase):
         uninstall = [widget for widget in self.window.detail_frame.findChildren(QtWidgets.QPushButton) if widget.text() == "Uninstall"][0]
         self.assertFalse(uninstall.icon().isNull())
         self.assertTrue(uninstall.toolTip())
-        import_button = [button for button in icon_buttons if button.accessibleName() == "Import files"][0]
+        import_button = self.window.mods_actions.button("import_files")
         self.assertFalse(import_button.icon().isNull())
         self.assertEqual(import_button.toolTip(), "Import mod files")
+        self.assertEqual(import_button.accessibleName(), "Import mod files")
 
     def test_save_settings_converts_numeric_values_and_refreshes_ui(self):
         self.window._run_action = self.run_action_inline
@@ -681,7 +664,7 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.cfg["gui_font_family"], selected_font)
         save_config.assert_called_once()
         refresh_all.assert_called_once_with()
-        self.assertEqual(self.window.status_var.get(), "Settings saved.")
+        self.assertEqual(self.window.context.status_text, "Settings saved.")
         self.assertFalse(self.window.settings_dialog.isVisible())
 
     def test_save_settings_includes_recursive_scan_checkbox(self):
@@ -718,7 +701,7 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(self.window.cfg["gui_theme"], "dark")
         apply_style.assert_called_once()
-        self.assertEqual(self.window.status_var.get(), "Settings saved.")
+        self.assertEqual(self.window.context.status_text, "Settings saved.")
 
     def test_accent_color_mode_defaults_to_system_with_color_row_hidden(self):
         self.window._run_action = self.run_action_inline
@@ -726,7 +709,7 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(self.window.setting_widgets["gui_accent_color_mode"].currentText(), "system")
         self.assertEqual(self.window.setting_widgets["gui_accent_color"].text(), "#2563eb")
-        self.assertFalse(self.window._settings_form.isRowVisible(self.window.accent_color_row))
+        self.assertFalse(self.window.settings_form.is_row_visible("gui_accent_color"))
 
     def test_selecting_custom_accent_mode_reveals_color_row_and_updates_preview(self):
         self.window._run_action = self.run_action_inline
@@ -734,7 +717,7 @@ class GuiTests(unittest.TestCase):
 
         self.window.setting_widgets["gui_accent_color_mode"].setCurrentText("custom")
 
-        self.assertTrue(self.window._settings_form.isRowVisible(self.window.accent_color_row))
+        self.assertTrue(self.window.settings_form.is_row_visible("gui_accent_color"))
         self.assertEqual(self.window._settings_accent_color().name(), "#2563eb")
 
     def test_choose_accent_color_updates_field_and_preview(self):
@@ -742,8 +725,8 @@ class GuiTests(unittest.TestCase):
         self.window._open_settings_dialog()
         self.window.setting_widgets["gui_accent_color_mode"].setCurrentText("custom")
 
-        with patch("mod_manager.gui.QtWidgets.QColorDialog.getColor", return_value=QtGui.QColor("#ff0000")):
-            self.window._choose_accent_color()
+        with patch("mod_manager.ui.dialogs.prompts.choose_color", return_value=QtGui.QColor("#ff0000")):
+            self.window._choose_color("gui_accent_color")
 
         self.assertEqual(self.window.setting_widgets["gui_accent_color"].text(), "#ff0000")
         self.assertEqual(self.window._settings_accent_color().name(), "#ff0000")
@@ -760,7 +743,7 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(self.window.cfg["gui_accent_color_mode"], "custom")
         self.assertEqual(self.window.cfg["gui_accent_color"], "#ff0000")
-        self.assertEqual(self.window.status_var.get(), "Settings saved.")
+        self.assertEqual(self.window.context.status_text, "Settings saved.")
         self.assertEqual(self.window._theme_accent.name(), "#ff0000")
 
     def test_clicking_accent_preview_badge_toggles_color_mode(self):
@@ -768,15 +751,15 @@ class GuiTests(unittest.TestCase):
         self.window._open_settings_dialog()
 
         self.assertEqual(self.window.setting_widgets["gui_accent_color_mode"].currentText(), "system")
-        self.assertFalse(self.window._settings_form.isRowVisible(self.window.accent_color_row))
+        self.assertFalse(self.window.settings_form.is_row_visible("gui_accent_color"))
 
         self.window.accent_preview_badge.click()
         self.assertEqual(self.window.setting_widgets["gui_accent_color_mode"].currentText(), "custom")
-        self.assertTrue(self.window._settings_form.isRowVisible(self.window.accent_color_row))
+        self.assertTrue(self.window.settings_form.is_row_visible("gui_accent_color"))
 
         self.window.accent_preview_badge.click()
         self.assertEqual(self.window.setting_widgets["gui_accent_color_mode"].currentText(), "system")
-        self.assertFalse(self.window._settings_form.isRowVisible(self.window.accent_color_row))
+        self.assertFalse(self.window.settings_form.is_row_visible("gui_accent_color"))
 
     def test_save_settings_without_accent_change_does_not_require_restart(self):
         self.window._run_action = self.run_action_inline
@@ -786,7 +769,7 @@ class GuiTests(unittest.TestCase):
         with patch("mod_manager.storage.save_config"):
             self.window._save_settings()
 
-        self.assertEqual(self.window.status_var.get(), "Settings saved.")
+        self.assertEqual(self.window.context.status_text, "Settings saved.")
 
     def test_text_color_mode_defaults_to_system_with_color_row_hidden(self):
         self.window._run_action = self.run_action_inline
@@ -794,7 +777,7 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(self.window.setting_widgets["gui_text_color_mode"].currentText(), "system")
         self.assertEqual(self.window.setting_widgets["gui_text_color"].text(), "#111827")
-        self.assertFalse(self.window._settings_form.isRowVisible(self.window.text_color_row))
+        self.assertFalse(self.window.settings_form.is_row_visible("gui_text_color"))
 
     def test_clicking_text_preview_badge_toggles_color_mode(self):
         self.window._run_action = self.run_action_inline
@@ -802,19 +785,19 @@ class GuiTests(unittest.TestCase):
 
         self.window.text_preview_badge.click()
         self.assertEqual(self.window.setting_widgets["gui_text_color_mode"].currentText(), "custom")
-        self.assertTrue(self.window._settings_form.isRowVisible(self.window.text_color_row))
+        self.assertTrue(self.window.settings_form.is_row_visible("gui_text_color"))
 
         self.window.text_preview_badge.click()
         self.assertEqual(self.window.setting_widgets["gui_text_color_mode"].currentText(), "system")
-        self.assertFalse(self.window._settings_form.isRowVisible(self.window.text_color_row))
+        self.assertFalse(self.window.settings_form.is_row_visible("gui_text_color"))
 
     def test_choose_text_color_updates_field_and_preview(self):
         self.window._run_action = self.run_action_inline
         self.window._open_settings_dialog()
         self.window.setting_widgets["gui_text_color_mode"].setCurrentText("custom")
 
-        with patch("mod_manager.gui.QtWidgets.QColorDialog.getColor", return_value=QtGui.QColor("#00ff00")):
-            self.window._choose_text_color()
+        with patch("mod_manager.ui.dialogs.prompts.choose_color", return_value=QtGui.QColor("#00ff00")):
+            self.window._choose_color("gui_text_color")
 
         self.assertEqual(self.window.setting_widgets["gui_text_color"].text(), "#00ff00")
         self.assertEqual(self.window._settings_text_color().name(), "#00ff00")
@@ -831,7 +814,7 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(self.window.cfg["gui_text_color_mode"], "custom")
         self.assertEqual(self.window.cfg["gui_text_color"], "#00ff00")
-        self.assertEqual(self.window.status_var.get(), "Settings saved.")
+        self.assertEqual(self.window.context.status_text, "Settings saved.")
         self.assertEqual(self.window._theme_button_text.name(), "#00ff00")
 
     def test_system_appearance_change_refreshes_theme_when_following_system(self):
@@ -856,35 +839,35 @@ class GuiTests(unittest.TestCase):
         preset_selection.select(self.window.presets_model.index(0, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
         preset_selection.select(self.window.presets_model.index(1, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
 
-        with patch("mod_manager.gui.toggle_presets_by_names", return_value=("Preset toggled", [], False)) as toggle, patch.object(
+        with patch("mod_manager.ui.app.toggle_presets_by_names", return_value=("Preset toggled", [], False)) as toggle, patch.object(
             self.window, "refresh_mods"
         ), patch.object(self.window, "refresh_presets"):
             self.window._toggle_selected_presets()
 
         toggle.assert_called_once_with(self.window.cfg, ["core", "ui"], {"combat.pak"})
-        self.assertEqual(self.window.status_var.get(), "Preset toggled")
+        self.assertEqual(self.window.context.status_text, "Preset toggled")
         self.assertFalse(self.window.presets_dialog.isVisible())
 
         self.window._open_broken_dialog()
         broken_selection = self.window.broken_table.selectionModel()
         broken_selection.select(self.window.broken_model.index(0, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
-        with patch("mod_manager.gui.deactivate_mod", return_value=(True, "OK")) as deactivate, patch.object(self.window, "refresh_broken"):
+        with patch("mod_manager.ui.app.deactivate_mod", return_value=(True, "OK")) as deactivate, patch.object(self.window, "refresh_broken"):
             self.window._remove_selected_broken()
 
         deactivate.assert_called_once_with(self.broken[0])
-        self.assertEqual(self.window.status_var.get(), "Removed broken links: 1")
+        self.assertEqual(self.window.context.status_text, "Removed broken links: 1")
         self.assertFalse(self.window.broken_dialog.isVisible())
 
     def test_preset_double_click_toggles_clicked_preset(self):
         self.window._run_action = self.run_action_inline
         self.window._open_presets_dialog()
-        with patch("mod_manager.gui.toggle_presets_by_names", return_value=("Preset toggled", [], False)) as toggle, patch.object(
+        with patch("mod_manager.ui.app.toggle_presets_by_names", return_value=("Preset toggled", [], False)) as toggle, patch.object(
             self.window, "refresh_mods"
         ), patch.object(self.window, "refresh_presets"):
             self.window.presets_table.doubleClicked.emit(self.window.presets_model.index(1, 0))
 
         toggle.assert_called_once_with(self.window.cfg, ["ui"], {"combat.pak"})
-        self.assertEqual(self.window.status_var.get(), "Preset toggled")
+        self.assertEqual(self.window.context.status_text, "Preset toggled")
         self.assertFalse(self.window.presets_dialog.isVisible())
 
     def test_preset_save_and_delete_keep_dialog_open(self):
@@ -892,14 +875,14 @@ class GuiTests(unittest.TestCase):
         self.window._open_presets_dialog()
         self.window.preset_name.setText("new")
 
-        with patch("mod_manager.gui.save_preset_from_installed", return_value=(True, "Saved")):
+        with patch("mod_manager.ui.app.save_preset_from_installed", return_value=(True, "Saved")):
             self.window._save_preset()
 
         self.assertTrue(self.window.presets_dialog.isVisible())
 
         selection = self.window.presets_table.selectionModel()
         selection.select(self.window.presets_model.index(0, 0), QtCore.QItemSelectionModel.Select | QtCore.QItemSelectionModel.Rows)
-        with patch("mod_manager.gui.delete_presets_by_names", return_value=(1, [])) as delete_presets:
+        with patch("mod_manager.ui.app.delete_presets_by_names", return_value=(1, [])) as delete_presets:
             self.window._delete_selected_presets()
 
         delete_presets.assert_called_once_with(["core"])
@@ -920,17 +903,17 @@ class GuiTests(unittest.TestCase):
         self.window._run_action = self.run_action_inline
         self.window.current_mod_items = [self.mods[0]]
 
-        with patch("mod_manager.gui.is_mod_file", side_effect=lambda path, _cfg: path.suffix == ".pak"), patch(
-            "mod_manager.gui.QtWidgets.QMessageBox.question",
-            return_value=QtWidgets.QMessageBox.Yes,
-        ) as question, patch("mod_manager.gui._run_import_batch", return_value=(["combat.pak"], ["new.pak"])) as import_batch, patch.object(
+        with patch("mod_manager.ui.app.is_mod_file", side_effect=lambda path, _cfg: path.suffix == ".pak"), patch(
+            "mod_manager.ui.dialogs.prompts.ask_yes_no",
+            return_value=True,
+        ) as question, patch("mod_manager.ui.app._run_import_batch", return_value=(["combat.pak"], ["new.pak"])) as import_batch, patch.object(
             self.window, "refresh_mods"
         ) as refresh_mods:
             self.window._import_paths([_FAKE_DROP / "combat.pak", _FAKE_DROP / "skip.txt", _FAKE_DROP / "new.pak"])
 
         question.assert_called_once()
         import_batch.assert_called_once()
-        self.assertEqual(self.window.status_var.get(), "Imported: 1. Skipped: 1.")
+        self.assertEqual(self.window.context.status_text, "Imported: 1. Skipped: 1.")
         refresh_mods.assert_called_once_with()
 
     def test_drop_image_on_target_mod_imports_without_picker_and_refreshes_tile(self):
@@ -940,9 +923,9 @@ class GuiTests(unittest.TestCase):
         self.window.tile_delegate._pixmaps[("combat.pak", 140)] = QtGui.QPixmap(1, 1)
         image_path = _FAKE_DROP / "new-preview.png"
 
-        with patch("mod_manager.gui.is_image_file", return_value=True), patch(
-            "mod_manager.gui._run_import_batch", return_value=(["combat.pak.png"], [])
-        ) as import_batch, patch("mod_manager.gui.QtWidgets.QInputDialog.getItem") as picker, patch.object(
+        with patch("mod_manager.ui.app.is_image_file", return_value=True), patch(
+            "mod_manager.ui.app._run_import_batch", return_value=(["combat.pak.png"], [])
+        ) as import_batch, patch("mod_manager.ui.app.QtWidgets.QInputDialog.getItem") as picker, patch.object(
             self.window, "refresh_mods"
         ) as refresh_mods:
             self.window._handle_mods_drop([image_path], target_mod_name="combat.pak")
@@ -957,9 +940,9 @@ class GuiTests(unittest.TestCase):
     def test_image_named_after_mod_opens_picker_with_that_mod_preselected(self):
         self.window._run_action = self.run_action_inline
 
-        with patch("mod_manager.gui.is_image_file", side_effect=lambda p: p.suffix == ".png"), patch(
-            "mod_manager.gui.QtWidgets.QInputDialog.getItem", return_value=("ui.pak", True)
-        ) as picker, patch("mod_manager.gui._run_import_batch", return_value=(["ui.pak.png"], [])) as import_batch, patch.object(
+        with patch("mod_manager.ui.app.is_image_file", side_effect=lambda p: p.suffix == ".png"), patch(
+            "mod_manager.ui.app.QtWidgets.QInputDialog.getItem", return_value=("ui.pak", True)
+        ) as picker, patch("mod_manager.ui.app._run_import_batch", return_value=(["ui.pak.png"], [])) as import_batch, patch.object(
             self.window, "refresh_mods"
         ):
             self.window._import_paths([_FAKE_DROP / "combat.pak.png"])
@@ -973,10 +956,10 @@ class GuiTests(unittest.TestCase):
     def test_image_dropped_together_with_its_mod_skips_picker(self):
         self.window._run_action = self.run_action_inline
 
-        with patch("mod_manager.gui.is_image_file", side_effect=lambda p: p.suffix == ".png"), patch(
-            "mod_manager.gui.is_mod_file", side_effect=lambda p, _cfg: p.suffix == ".pak"
-        ), patch("mod_manager.gui.QtWidgets.QInputDialog.getItem") as picker, patch(
-            "mod_manager.gui._run_import_batch", return_value=(["new.pak", "new.pak.png"], [])
+        with patch("mod_manager.ui.app.is_image_file", side_effect=lambda p: p.suffix == ".png"), patch(
+            "mod_manager.ui.app.is_mod_file", side_effect=lambda p, _cfg: p.suffix == ".pak"
+        ), patch("mod_manager.ui.app.QtWidgets.QInputDialog.getItem") as picker, patch(
+            "mod_manager.ui.app._run_import_batch", return_value=(["new.pak", "new.pak.png"], [])
         ) as import_batch, patch.object(self.window, "refresh_mods"):
             self.window._import_paths([_FAKE_DROP / "new.pak", _FAKE_DROP / "new.pak.png"])
 
@@ -990,10 +973,10 @@ class GuiTests(unittest.TestCase):
         self.select_mod_rows(0)
         image_path = _FAKE_DROP / "clip.png"
 
-        with patch("mod_manager.gui.read_clipboard_paths", return_value=[]), patch(
-            "mod_manager.gui.read_clipboard_image", return_value=image_path
-        ), patch("mod_manager.gui.QtWidgets.QInputDialog.getItem") as picker, patch(
-            "mod_manager.gui.import_mod_image", return_value=(True, "combat.pak.png")
+        with patch("mod_manager.ui.app.read_clipboard_paths", return_value=[]), patch(
+            "mod_manager.ui.app.read_clipboard_image", return_value=image_path
+        ), patch("mod_manager.ui.app.QtWidgets.QInputDialog.getItem") as picker, patch(
+            "mod_manager.ui.app.import_mod_image", return_value=(True, "combat.pak.png")
         ) as import_image, patch.object(self.window, "refresh_mods"):
             self.window._handle_paste()
 
@@ -1005,10 +988,10 @@ class GuiTests(unittest.TestCase):
         self.window._current_mod_view().selectionModel().clearSelection()
         image_path = _FAKE_DROP / "clip.png"
 
-        with patch("mod_manager.gui.read_clipboard_paths", return_value=[]), patch(
-            "mod_manager.gui.read_clipboard_image", return_value=image_path
-        ), patch("mod_manager.gui.QtWidgets.QInputDialog.getItem", return_value=("ui.pak", True)) as picker, patch(
-            "mod_manager.gui.import_mod_image", return_value=(True, "ui.pak.png")
+        with patch("mod_manager.ui.app.read_clipboard_paths", return_value=[]), patch(
+            "mod_manager.ui.app.read_clipboard_image", return_value=image_path
+        ), patch("mod_manager.ui.app.QtWidgets.QInputDialog.getItem", return_value=("ui.pak", True)) as picker, patch(
+            "mod_manager.ui.app.import_mod_image", return_value=(True, "ui.pak.png")
         ) as import_image, patch.object(self.window, "refresh_mods"):
             self.window._handle_paste()
 
@@ -1019,9 +1002,9 @@ class GuiTests(unittest.TestCase):
         self.window._run_action = self.run_action_inline
         self.select_mod_rows(1)
 
-        with patch("mod_manager.gui.is_image_file", side_effect=lambda p: p.suffix == ".png"), patch(
-            "mod_manager.gui.QtWidgets.QInputDialog.getItem"
-        ) as picker, patch("mod_manager.gui._run_import_batch", return_value=(["ui.pak.png"], [])) as import_batch, patch.object(
+        with patch("mod_manager.ui.app.is_image_file", side_effect=lambda p: p.suffix == ".png"), patch(
+            "mod_manager.ui.app.QtWidgets.QInputDialog.getItem"
+        ) as picker, patch("mod_manager.ui.app._run_import_batch", return_value=(["ui.pak.png"], [])) as import_batch, patch.object(
             self.window, "refresh_mods"
         ):
             self.window._handle_clipboard_paths([_FAKE_DROP / "art.png"])

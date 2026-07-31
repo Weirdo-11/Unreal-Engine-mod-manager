@@ -29,12 +29,20 @@ def worker_count(value: str, total: int) -> int:
     return max(1, min(total, int(value)))
 
 
-def run_test(test_id: str) -> tuple[str, int, str]:
-    result = subprocess.run(
-        [sys.executable, "-m", "unittest", test_id],
-        capture_output=True,
-        text=True,
-    )
+def run_test(test_id: str, timeout: float) -> tuple[str, int, str]:
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "unittest", test_id],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as expired:
+        captured = "".join(
+            stream.decode(errors="replace") if isinstance(stream, bytes) else (stream or "")
+            for stream in (expired.stdout, expired.stderr)
+        )
+        return test_id, 1, f"{captured}\nTIMEOUT after {timeout:g}s. A blocking dialog or an unfinished worker is likely."
     output = (result.stdout or "") + (result.stderr or "")
     return test_id, result.returncode, output
 
@@ -43,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run project tests, optionally in parallel.")
     parser.add_argument("--jobs", default="auto", help="Number of parallel workers, or auto.")
     parser.add_argument("--tests-dir", default="tests")
+    parser.add_argument("--timeout", type=float, default=60.0, help="Seconds a single test may take before it is killed.")
     args = parser.parse_args(argv)
 
     root = Path(args.tests_dir)
@@ -56,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
 
     failures = []
     with ThreadPoolExecutor(max_workers=jobs) as executor:
-        futures = {executor.submit(run_test, test_id): test_id for test_id in test_ids}
+        futures = {executor.submit(run_test, test_id, args.timeout): test_id for test_id in test_ids}
         for future in as_completed(futures):
             test_id, code, output = future.result()
             print(f"\n== {test_id} ==")

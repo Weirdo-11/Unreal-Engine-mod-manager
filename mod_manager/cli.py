@@ -5,6 +5,7 @@ from typing import Dict, List
 
 from app_paths import APP_NAME, APP_VERSION
 
+from . import settings_schema
 from .cli_utils import ensure_paths, open_folder, parse_multi_choice
 from .mods import (
     add_label_to_mods,
@@ -160,10 +161,14 @@ def _run_settings(args: argparse.Namespace, cfg: Dict) -> int:
             print(f"{key}: {cfg[key]}")
         return 0
     changed = False
-    for key in ["game_mods_dir", "mods_source_dir", "mod_extensions", "mod_recursive_scan", "page_size", "max_mod_name_len", "max_preset_name_len", "max_label_name_len", "gui_theme", "gui_accent_color_mode", "gui_accent_color", "gui_text_color_mode", "gui_text_color"]:
-        value = getattr(args, key)
+    for spec in settings_schema.all_specs():
+        value = getattr(args, spec.key, None)
         if value is not None:
-            cfg[key] = value
+            try:
+                cfg[spec.key] = settings_schema.coerce_value(spec, value)
+            except ValueError as error:
+                print(str(error))
+                return 2
             changed = True
     if changed:
         save_config(cfg)
@@ -298,19 +303,16 @@ def build_parser() -> argparse.ArgumentParser:
     settings_sub = settings.add_subparsers(dest="settings_cmd", required=True)
     settings_sub.add_parser("show")
     settings_set = settings_sub.add_parser("set")
-    settings_set.add_argument("--game-mods-dir")
-    settings_set.add_argument("--mods-source-dir")
-    settings_set.add_argument("--mod-extensions")
-    settings_set.add_argument("--mod-recursive-scan", action=argparse.BooleanOptionalAction, default=None)
-    settings_set.add_argument("--page-size", type=int)
-    settings_set.add_argument("--max-mod-name-len", type=int)
-    settings_set.add_argument("--max-preset-name-len", type=int)
-    settings_set.add_argument("--max-label-name-len", type=int)
-    settings_set.add_argument("--gui-theme", choices=["system", "light", "dark"])
-    settings_set.add_argument("--gui-accent-color-mode", choices=["system", "custom"])
-    settings_set.add_argument("--gui-accent-color")
-    settings_set.add_argument("--gui-text-color-mode", choices=["system", "custom"])
-    settings_set.add_argument("--gui-text-color")
+    for spec in settings_schema.all_specs():
+        flag = "--" + spec.key.replace("_", "-")
+        if spec.kind == settings_schema.FLAG:
+            settings_set.add_argument(flag, action=argparse.BooleanOptionalAction, default=None, help=spec.tooltip)
+        elif spec.kind == settings_schema.CHOICE:
+            settings_set.add_argument(flag, choices=list(spec.choices), help=spec.tooltip)
+        elif spec.kind == settings_schema.INT:
+            settings_set.add_argument(flag, type=int, help=spec.tooltip)
+        else:
+            settings_set.add_argument(flag, help=spec.tooltip)
 
     games = sub.add_parser("games")
     games_sub = games.add_subparsers(dest="games_cmd", required=True)
@@ -398,7 +400,7 @@ def run_cli(argv: List[str] | None = None) -> int:
     if args.cmd == "broken":
         return _run_broken(args, cfg)
     if args.cmd == "gui":
-        from .gui import run_gui
+        from .ui import run_gui
         return run_gui()
     parser.print_help()
     return 0

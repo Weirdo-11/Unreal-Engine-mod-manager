@@ -86,11 +86,50 @@ python tests/run_tests.py --jobs auto
 
 The parallel runner discovers every individual test case in `tests/test_*.py` and runs them across available workers. Use `--jobs 1` for a serial run. The tests cover CLI request parsing and dispatch, the `python mod-manager.py` launcher modes, and core GUI flows with filesystem, dialogs, and link operations patched out.
 
+Each test gets its own process with a timeout (`--timeout`, 60 seconds by default). A test that exceeds it is killed and reported as a failure instead of blocking the run, so a stray modal dialog or an unfinished background worker can never hang the suite. `tests/qt_support.py` also turns an unexpected modal dialog into an immediate failure and disposes each window properly, which keeps the GUI tests fast.
+
 The standard unittest command is still supported:
 
 ```bash
 python -m unittest discover -s tests -p "test_*.py"
 ```
+
+`tests/test_architecture.py` is an architecture guard: it fails if a module outside `mod_manager/ui/` imports PySide6, if the token modules stop being Qt-free, or if a colour literal appears outside `mod_manager/ui/theme/colors.py`.
+</details>
+
+---
+
+<details>
+<summary>Project Structure</summary>
+
+```
+app_paths.py                    App identity, paths, DEFAULT_CONFIG
+mod_manager/
+  cli.py  menus.py              Command line and console menus
+  mods.py  presets.py  links.py Mod discovery, presets, link management
+  storage.py  workers.py        JSON storage, background workers
+  dragdrop.py  image.py         Windows COM drag/drop, image scaling
+  settings_schema.py            Setting labels, tooltips, ranges, validation (Qt-free)
+  ui/
+    __init__.py                 Startup: config -> UI scale -> Qt -> window
+    gui shell (gui.py)          Main window
+    context.py  task_runner.py  Shared app state and background actions
+    icons.py                    Standard and painted icons
+    theme/
+      colors.py                 Every colour, light and dark (Qt-free)
+      tokens.py                 Every size, padding, radius, column spec (Qt-free)
+      stylesheet.py             Stylesheet generated from colours and tokens
+      accent.py  manager.py     OS accent detection and theme application
+    widgets/                    Reusable components: buttons, toolbar sections,
+                                forms, pager, detail panel, drop target
+    models/                     Table models, tile delegate, column setup
+    pages/toolbar_specs.py      Declarative action button groups
+    dialogs/                    Dialog shells and modal prompts
+    controllers/                Widget registry and action wiring
+tests/                          unittest suite plus the architecture guard
+```
+
+Action buttons are never placed in a flat row. Each group is declared in `mod_manager/ui/pages/toolbar_specs.py` as `(section key, caption, actions)` and rendered by `IconToolbar` as a captioned bordered section.
 </details>
 
 <details>
@@ -143,7 +182,6 @@ pip install -r requirements.txt
 <summary>Data Files</summary>
 
 
-- `config.json` stores application settings.
 - `config.json` stores application settings and game profile definitions.
 - `profiles/<profile-id>-presets.json` stores named mod sets for each game profile.
 - `profiles/<profile-id>-labels.json` stores labels plus last-managed metadata for each game profile.
@@ -264,6 +302,11 @@ python mod-manager.py presets delete 2,3
 **`set` options:**
 
 ```
+--mods-source-dir <path>
+--game-mods-dir <path>
+--mod-extensions <list>
+--mod-recursive-scan / --no-mod-recursive-scan
+--link-prefix <text>
 --page-size <n>
 --max-mod-name-len <n>
 --max-preset-name-len <n>
@@ -273,11 +316,36 @@ python mod-manager.py presets delete 2,3
 --gui-accent-color <#rrggbb>
 --gui-text-color-mode system|custom
 --gui-text-color <#rrggbb>
+--gui-font-family <name>
+--gui-font-size <n>
+--ui-scale-percent <n>
+--mod-view-mode list|tiles
+--tile-size <n>
+--placeholder-image-col-width <n>
 ```
+
+These flags are generated from `mod_manager/settings_schema.py`, so `settings set --help` prints the same description that the GUI shows as a tooltip, and the same validation applies to both.
 
 Game-specific paths and extension settings live in `games` profiles. The legacy `settings set --game-mods-dir`, `--mods-source-dir`, `--mod-extensions`, and `--mod-recursive-scan` flags still update the active profile for compatibility.
 
-In the GUI, the "Game profile" dialog (Games > Add/Edit) shows a "Recursive" checkbox next to the mod file extensions field — see the `games` command reference above for details on the `folders` token and recursive scanning.
+In the GUI, the "Game profile" dialog (Games > Add/Edit) shows a "Scan subfolders" checkbox next to the mod file extensions field — see the `games` command reference above for details on the `folders` token and recursive scanning.
+
+#### Settings labels and tooltips
+
+Every setting is defined once in `mod_manager/settings_schema.py` with a human-readable label, a description shown as a hover tooltip, and its allowed range. The Settings dialog and the Game profile dialog are both generated from that schema, so a setting only ever has one label and one description.
+
+The dialog groups the settings into four sections:
+
+| Section | Contains |
+|---|---|
+| Mods | Mods source folder, Game mods folder, Mod file extensions, Scan subfolders, Link name prefix |
+| Lists | Mods per page, Max mod name length, Max preset name length, Max label length |
+| Appearance | Theme, Accent colour, Text colour, Font family, Font size, Interface scale |
+| Mods view | Mods view, Tile size, State column width |
+
+Values are validated on save; an out-of-range number is reported by label, for example `Mods per page must be between 1 and 1000.`
+
+`Interface scale` (`ui_scale_percent`) is applied through `QT_SCALE_FACTOR` at startup and needs the application restarted to take effect. `Font family` and `Font size` apply immediately after saving.
 
 The GUI theme, accent color, and text color all apply immediately when saved — no restart needed. While set to `system`, the GUI also follows live OS theme/accent changes without restarting.
 
@@ -285,7 +353,9 @@ The accent color used for highlights, the installed badge, and active buttons fo
 
 The general text color (window, button, and tooltip text) also follows the system theme by default. Set `--gui-text-color-mode custom` with `--gui-text-color <#rrggbb>` to override it with a fixed color.
 
-In the GUI, the Settings dialog shows a "Choose" color picker and a live "Theme preview" row for both the accent and text colors. Clicking the preview checkmark or "Aa" badge toggles that color between "system" and "custom" mode.
+In the GUI, the Settings dialog shows a "Choose" color picker and a live "Theme preview" row for both the accent and text colors. Clicking the preview checkmark or "Aa" badge toggles that color between "system" and "custom" mode. The custom colour rows stay hidden while the matching mode is "system".
+
+All GUI colours are defined in `mod_manager/ui/theme/colors.py` and all sizes, paddings, radii and column widths in `mod_manager/ui/theme/tokens.py`. The stylesheet is generated from those two files, so light and dark themes stay in step.
 
 **Examples:**
 

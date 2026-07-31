@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "Mod Manager"
-APP_VERSION = "1.0.8"
+APP_VERSION = "1.2.1"
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
@@ -35,7 +35,6 @@ DEFAULT_CONFIG = {
     "max_mod_name_len": 28,
     "max_preset_name_len": 28,
     "max_label_name_len": 12,
-    "button_size_percent": 100,
     "gui_theme": "system",
     "gui_accent_color_mode": "system",
     "gui_accent_color": "#2563eb",
@@ -43,6 +42,7 @@ DEFAULT_CONFIG = {
     "gui_text_color": "#111827",
     "gui_font_family": "",
     "gui_font_size": 10,
+    "ui_scale_percent": 100,
     "placeholder_image_col_width": 56,
     "mod_view_mode": "list",
     "tile_size": 140,

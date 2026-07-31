@@ -1,0 +1,149 @@
+from __future__ import annotations
+
+SPACE_XS = 2
+SPACE_SM = 4
+SPACE_MD = 6
+SPACE_LG = 8
+SPACE_XL = 10
+SPACE_2XL = 12
+SPACE_3XL = 18
+
+PAGE_MARGIN = 28
+DETAIL_MARGIN = 12
+TOOLBAR_SECTION_MARGIN = 6
+FORM_LABEL_MIN_WIDTH = 170
+
+RADIUS_SM = 4
+RADIUS_MD = 7
+RADIUS_LG = 8
+RADIUS_IMAGE = 5
+
+BORDER_WIDTH = 1
+ICON_SIZE = 18
+PREVIEW_ICON_SIZE = 22
+ICON_BUTTON_SIZE = 32
+GAME_BUTTON_MIN_WIDTH = 48
+TEXT_BUTTON_MIN_WIDTH = 96
+LABEL_EDIT_MAX_WIDTH = 160
+PROFILE_FIELD_MIN_WIDTH = 420
+DETAIL_LABEL_MIN_WIDTH = 110
+DETAIL_DATES_SPACING = 28
+DETAIL_IMAGE_INSET = 2
+
+MIN_WIDTH = 880
+MIN_HEIGHT = 560
+DEFAULT_WIDTH = 1200
+DEFAULT_HEIGHT = 750
+DIALOG_SIZE = (760, 520)
+LARGE_DIALOG_SIZE = (820, 560)
+TILE_LIST_STRETCH = 3
+TILE_DETAIL_STRETCH = 2
+
+TITLE_FONT_STEP = 6
+TITLE_FONT_MIN = 16
+
+CHECK_PEN_MIN = 2.0
+CHECK_PEN_RATIO = 0.14
+CHECK_PATH = ((0.22, 0.50), (0.43, 0.72), (0.78, 0.28))
+
+SORT_ARROW_PEN = 2.2
+SORT_ARROW_MARGIN = 4
+SORT_ARROW_HEAD = 5
+SORT_ARROW_HEAD_Y = 10
+
+STATE_ICON_SIZE = 18
+STATE_ICON_PEN = 2.6
+STATE_CHECK_PATH = ((4, 9), (8, 13), (14, 5))
+STATE_CROSS_PATH = (((5, 5), (13, 13)), ((13, 5), (5, 13)))
+
+TILE_CARD_INSET = 6
+TILE_CONTENT_PAD = 8
+TILE_IMAGE_MIN_HEIGHT = 48
+TILE_IMAGE_HEIGHT_TRIM = 18
+TILE_BADGE_MARGIN = 12
+TILE_BADGE_HEIGHT = 24
+TILE_CHECK_BADGE_WIDTH = 28
+TILE_BADGE_RADIUS = 4
+TILE_BADGE_CHECK_PEN = 2.8
+TILE_BADGE_CHECK_PATH = ((7, 12), (12, 17), (21, 7))
+TILE_LABEL_BADGE_MAX_CHARS = 8
+TILE_LABEL_BADGE_MIN_WIDTH = 34
+TILE_LABEL_BADGE_PADDING = 14
+TILE_LABEL_TEXT_INSET = 7
+TILE_NAME_TEXT_INSET = 8
+TILE_CARD_RADIUS = 8
+TILE_CARD_INNER_RADIUS = 7
+TILE_SHADOW_OFFSET = 2
+TILE_GRADIENT_MID = 0.45
+TILE_SIZE_MIN = 96
+TILE_SIZE_MAX = 280
+TILE_SIZE_STEP = 12
+TILE_EXTRA_WIDTH = 28
+TILE_EXTRA_HEIGHT = 58
+
+COMBO_PAD_V = 5
+COMBO_PAD_RIGHT = 20
+COMBO_PAD_LEFT = 9
+COMBO_ARROW_WIDTH = 18
+MENU_ITEM_PADDING = (6, 24, 6, 12)
+MENUBAR_ITEM_PADDING = (4, 8)
+BUTTON_PADDING = (6, 10)
+FIELD_PADDING = (4, 8)
+
+WORKER_POLL_MS = 50
+IMMEDIATE_MS = 0
+
+SCALE_MIN = 50
+SCALE_MAX = 400
+
+ALIGN_LEFT = "left"
+ALIGN_CENTER = "center"
+ALIGN_RIGHT = "right"
+
+RESIZE_FIXED = "fixed"
+RESIZE_STRETCH = "stretch"
+RESIZE_CONTENTS = "contents"
+
+MOD_COLUMNS = (
+    ("installed", "", RESIZE_FIXED, ALIGN_CENTER),
+    ("name", "Name", RESIZE_STRETCH, ALIGN_LEFT),
+    ("label", "Label", RESIZE_CONTENTS, ALIGN_LEFT),
+    ("last_managed", "Last managed", RESIZE_CONTENTS, ALIGN_LEFT),
+)
+
+PRESET_COLUMNS = (
+    ("name", "Preset", RESIZE_STRETCH, ALIGN_LEFT),
+    ("state", "State", RESIZE_CONTENTS, ALIGN_CENTER),
+    ("mods", "Mods", RESIZE_CONTENTS, ALIGN_LEFT),
+    ("last_managed", "Last managed", RESIZE_CONTENTS, ALIGN_LEFT),
+)
+
+BROKEN_COLUMNS = (
+    ("name", "Broken link", RESIZE_STRETCH, ALIGN_LEFT),
+    ("dest", "Destination", RESIZE_STRETCH, ALIGN_LEFT),
+)
+
+
+def clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(high, value))
+
+
+def to_int(value, fallback: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def clamp_tile_size(value) -> int:
+    return int(clamp(to_int(value, TILE_SIZE_MIN), TILE_SIZE_MIN, TILE_SIZE_MAX))
+
+
+def tile_item_size(tile_size) -> tuple[int, int]:
+    size = max(TILE_SIZE_MIN, to_int(tile_size, TILE_SIZE_MIN))
+    return size + TILE_EXTRA_WIDTH, size + TILE_EXTRA_HEIGHT
+
+
+def scaled(value: int, scale_percent) -> int:
+    percent = clamp(to_int(scale_percent, 100), SCALE_MIN, SCALE_MAX)
+    return max(1, int(round(value * percent / 100.0)))

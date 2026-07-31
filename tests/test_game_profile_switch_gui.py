@@ -71,7 +71,7 @@ class GameProfileSwitchGuiTests(unittest.TestCase):
         storage.set_active_game_profile(cfg, first["id"])
         storage.save_config(cfg)
 
-        from mod_manager.gui import ModManagerGui
+        from mod_manager.ui.app import ModManagerGui
 
         win = ModManagerGui()
         try:

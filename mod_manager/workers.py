@@ -29,18 +29,9 @@ def _run_deactivate_batch(mods: list) -> int:
 
 
 def _run_save_settings(cfg: dict, values: dict) -> dict:
+    from .settings_schema import coerce_settings
     from .storage import save_config
-    _NUMERIC = frozenset({
-        "page_size", "max_mod_name_len", "max_preset_name_len", "max_label_name_len",
-        "ui_scale_percent", "gui_font_size", "tile_size", "window_width", "window_height",
-    })
-    new_cfg = {**cfg}
-    for key, value in values.items():
-        numeric = str(value).rstrip("%")
-        if key in _NUMERIC and numeric.isdigit():
-            new_cfg[key] = int(numeric)
-        else:
-            new_cfg[key] = value
+    new_cfg = {**cfg, **coerce_settings(values)}
     save_config(new_cfg)
     return new_cfg
 
