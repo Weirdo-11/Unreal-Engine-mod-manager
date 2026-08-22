@@ -201,6 +201,24 @@ class GameProfileStorageTests(unittest.TestCase):
         self.assertNotIn(storage.FAVORITES_KEY, storage.load_mod_records())
         self.assertEqual(storage.load_favorites({}), {"legacy.pak"})
 
+    def test_saving_the_config_never_writes_top_level_keys_into_a_profile(self):
+        cfg = storage.load_config()
+        first = storage.create_game_profile("First Game", {"mods_source_dir": "A", "game_mods_dir": "B"}, cfg)
+        second = storage.create_game_profile("Second Game", {"mods_source_dir": "C", "game_mods_dir": "D"}, cfg)
+        cfg["mods_source_dir"] = "tampered"
+        cfg["mod_extensions"] = ".tampered"
+        cfg["page_size"] = 25
+
+        storage.save_config(cfg)
+        reloaded = storage.load_config()
+
+        profiles = {profile["id"]: profile for profile in reloaded["game_profiles"]}
+        self.assertEqual(profiles[first["id"]]["mods_source_dir"], "A")
+        self.assertEqual(profiles[second["id"]]["mods_source_dir"], "C")
+        self.assertEqual(profiles[second["id"]]["mod_extensions"], "")
+        self.assertEqual(reloaded["mods_source_dir"], "C")
+        self.assertEqual(reloaded["page_size"], 25)
+
 class GameProfileCliTests(unittest.TestCase):
     def test_games_add_select_and_list_use_profile_contract(self):
         cfg = {"game_profiles": [], "active_game_profile_id": ""}

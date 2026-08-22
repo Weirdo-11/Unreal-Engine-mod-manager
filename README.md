@@ -311,11 +311,6 @@ python mod-manager.py presets delete 2,3
 **`set` options:**
 
 ```
---mods-source-dir <path>
---game-mods-dir <path>
---mod-extensions <list>
---mod-recursive-scan / --no-mod-recursive-scan
---link-prefix <text>
 --page-size <n>
 --max-mod-name-len <n>
 --max-preset-name-len <n>
@@ -335,7 +330,7 @@ python mod-manager.py presets delete 2,3
 
 These flags are generated from `mod_manager/settings_schema.py`, so `settings set --help` prints the same description that the GUI shows as a tooltip, and the same validation applies to both.
 
-Game-specific paths and extension settings live in `games` profiles. The legacy `settings set --game-mods-dir`, `--mods-source-dir`, `--mod-extensions`, and `--mod-recursive-scan` flags still update the active profile for compatibility.
+Game-specific paths and extension settings (`mods_source_dir`, `game_mods_dir`, `mod_extensions`, `mod_recursive_scan`, `link_prefix`) are not application settings. They are edited only through `games add` / `games edit` and the GUI "Game profile" dialog, and a settings update never changes them. `settings show` still prints the values of the active profile.
 
 In the GUI, the "Game profile" dialog (Games > Add/Edit) shows a "Scan subfolders" checkbox next to the mod file extensions field — see the `games` command reference above for details on the `folders` token and recursive scanning.
 
@@ -343,11 +338,10 @@ In the GUI, the "Game profile" dialog (Games > Add/Edit) shows a "Scan subfolder
 
 Every setting is defined once in `mod_manager/settings_schema.py` with a human-readable label, a description shown as a hover tooltip, and its allowed range. The Settings dialog and the Game profile dialog are both generated from that schema, so a setting only ever has one label and one description.
 
-The dialog groups the settings into four compact bordered sections:
+The dialog groups the settings into three compact bordered sections:
 
 | Section | Contains |
 |---|---|
-| Mods | Mods source folder, Game mods folder, Mod file extensions, Scan subfolders, Link name prefix |
 | Lists | Mods per page, Max mod name length, Max preset name length, Max label length |
 | Appearance | Theme, Accent colour, Text colour, Font family, Font size, Interface scale |
 | Mods view | Mods view, Tile size, State column width |

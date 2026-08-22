@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import unittest
+from copy import deepcopy
 from unittest.mock import patch
 
 from tests.qt_support import qt_available
-from tests.window_fixture import FAKE_DEST, WindowTestCase
+from tests.window_fixture import WindowTestCase
 
 from app_paths import DEFAULT_CONFIG
 
 from mod_manager import settings_schema as schema
+from mod_manager.storage import create_game_profile
 
 if qt_available():
     from PySide6 import QtGui, QtWidgets
@@ -47,8 +49,8 @@ class SettingsFormTest(WindowTestCase):
         self.assertEqual(self.form.fields["page_size"].width(), tokens.FORM_SHORT_FIELD_WIDTH)
         self.assertLessEqual(self.form.fields["gui_theme"].maximumWidth(), tokens.FORM_MEDIUM_FIELD_WIDTH)
         self.assertEqual(
-            self.form.fields["mods_source_dir"].sizePolicy().horizontalPolicy(),
-            QtWidgets.QSizePolicy.Expanding,
+            self.form.fields["page_size"].sizePolicy().horizontalPolicy(),
+            QtWidgets.QSizePolicy.Fixed,
         )
 
     def test_numeric_fields_share_rows_in_pairs(self):
@@ -81,27 +83,14 @@ class SettingsFormTest(WindowTestCase):
         self.assertEqual(self.window.settings.font_preview.font().pointSize(), 17)
         self.assertEqual(QtWidgets.QApplication.instance().font(), before)
 
-    def test_per_game_paths_are_visible_settings(self):
-        for key in ("mods_source_dir", "game_mods_dir", "mod_extensions", "mod_recursive_scan", "link_prefix"):
-            self.assertIn(key, self.form.fields, key)
-            self.assertTrue(self.form.is_row_visible(key), key)
-
-    def test_path_settings_get_a_browse_button(self):
-        for key in ("mods_source_dir", "game_mods_dir"):
-            button = self.form.buttons[f"browse_{key}"]
-            self.assertTrue(button.toolTip().startswith("Browse for"), key)
-
-    def test_flag_settings_render_as_checkboxes(self):
-        self.assertIsInstance(self.form.fields["mod_recursive_scan"], QtWidgets.QCheckBox)
+    def test_per_game_settings_are_not_offered_here(self):
+        for key in schema.PROFILE_KEYS:
+            self.assertNotIn(key, self.form.fields, key)
+        self.assertNotIn("Mods", self.form.sections)
 
     def test_choice_settings_render_their_choices(self):
         widget = self.form.fields["gui_theme"]
         self.assertEqual([widget.itemText(i) for i in range(widget.count())], ["system", "light", "dark"])
-
-    def test_browse_writes_the_chosen_path_into_the_field(self):
-        with patch("mod_manager.ui.dialogs.prompts.choose_directory", return_value=str(FAKE_DEST)):
-            self.window._browse_setting("game_mods_dir")
-        self.assertEqual(self.form.fields["game_mods_dir"].text(), str(FAKE_DEST))
 
 
 @unittest.skipUnless(qt_available(), "PySide6 is not installed")
@@ -197,16 +186,6 @@ class SettingsSaveTest(WindowTestCase):
         show_error.assert_called_once()
         self.assertIn("Mods per page must be between 1 and 1000.", show_error.call_args[0][2])
 
-    def test_saving_per_game_paths_reaches_the_config(self):
-        self.window.settings_form.fields["mod_extensions"].setText(".pak")
-        self.window.settings_form.fields["mod_recursive_scan"].setChecked(True)
-
-        with patch("mod_manager.storage.save_config"):
-            self.window._save_settings()
-
-        self.assertEqual(self.window.cfg["mod_extensions"], ".pak")
-        self.assertIs(self.window.cfg["mod_recursive_scan"], True)
-
     def test_saving_a_new_state_column_width_resizes_the_column(self):
         self.window.settings_form.fields["placeholder_image_col_width"].setText("96")
 
@@ -223,6 +202,37 @@ class SettingsSaveTest(WindowTestCase):
 
         self.assertEqual(QtWidgets.QApplication.instance().font().pointSize(), 17)
         self.assertEqual(self.window.search_box.font().pointSize(), 17)
+
+
+def two_game_profiles() -> dict:
+    cfg: dict = {"game_profiles": [], "active_game_profile_id": ""}
+    create_game_profile("First Game", {"mods_source_dir": "A", "game_mods_dir": "B", "mod_extensions": ".pak"}, cfg)
+    create_game_profile("Second Game", {"mods_source_dir": "C", "game_mods_dir": "D", "mod_extensions": ".utoc"}, cfg)
+    return cfg
+
+
+@unittest.skipUnless(qt_available(), "PySide6 is not installed")
+class SettingsKeepGameProfilesTest(WindowTestCase):
+    """Saving application settings must never rewrite a game profile."""
+
+    def setUp(self) -> None:
+        self.config_overrides = two_game_profiles()
+        super().setUp()
+        self.use_inline_runner()
+        self.window._open_settings_dialog()
+
+    def test_saving_settings_leaves_every_game_profile_untouched(self):
+        before = deepcopy(self.window.cfg["game_profiles"])
+        self.window.settings_form.fields["page_size"].setText("25")
+
+        with patch("mod_manager.storage.save_config"):
+            self.window._save_settings()
+
+        self.assertEqual(self.window.cfg["page_size"], 25)
+        self.assertEqual(self.window.cfg["game_profiles"], before)
+        active = self.window.cfg["game_profiles"][1]
+        self.assertEqual(active["mods_source_dir"], "C")
+        self.assertEqual(active["mod_extensions"], ".utoc")
 
 
 if __name__ == "__main__":

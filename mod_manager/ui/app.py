@@ -1454,9 +1454,6 @@ class ModManagerGui(QtWidgets.QMainWindow):
             if row < len(self.presets_model.keys)
         ]
 
-    def _browse_setting(self, key: str) -> None:
-        self.settings.browse(key)
-
     def _choose_color(self, key: str) -> None:
         self.settings.choose_color(key)
 

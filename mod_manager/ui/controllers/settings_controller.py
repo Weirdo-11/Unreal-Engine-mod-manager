@@ -80,12 +80,12 @@ class SettingsController(QtCore.QObject):
                     continue
                 if pending_int is not None:
                     pending_spec, pending_value = pending_int
-                    self.form.add_spec(pending_spec, pending_value, self.browse)
+                    self.form.add_spec(pending_spec, pending_value)
                     pending_int = None
-                self.form.add_spec(spec, values[spec.key], self.browse, action)
+                self.form.add_spec(spec, values[spec.key], action=action)
             if pending_int is not None:
                 pending_spec, pending_value = pending_int
-                self.form.add_spec(pending_spec, pending_value, self.browse)
+                self.form.add_spec(pending_spec, pending_value)
             if title == "Appearance":
                 self.form.add_widget(FONT_PREVIEW_LABEL, self._build_font_preview())
                 self.form.add_widget(PREVIEW_LABEL, self._build_preview_row())
@@ -152,13 +152,6 @@ class SettingsController(QtCore.QObject):
         if size > 0:
             font.setPointSize(size)
         self.font_preview.setFont(font)
-
-    def browse(self, key: str) -> None:
-        path = prompts.choose_directory(self.window, settings_schema.label_for(key))
-        if path:
-            widget = self.fields.get(key)
-            if isinstance(widget, QtWidgets.QLineEdit):
-                widget.setText(path)
 
     def fallback_color(self, key: str) -> QtGui.QColor:
         palette = self.window.theme.palette

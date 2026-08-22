@@ -4,6 +4,7 @@ import unittest
 
 from app_paths import DEFAULT_CONFIG
 from mod_manager import settings_schema as schema
+from mod_manager import storage
 
 
 class SchemaShapeTest(unittest.TestCase):
@@ -40,8 +41,16 @@ class SchemaShapeTest(unittest.TestCase):
                 self.assertIn(required, keys[other_key].choices, spec.key)
 
     def test_schema_covers_every_user_visible_default_config_key(self):
-        visible = set(DEFAULT_CONFIG) - schema.INTERNAL_KEYS
+        visible = set(DEFAULT_CONFIG) - schema.NON_SETTING_KEYS
         self.assertEqual(visible, {spec.key for spec in schema.all_specs()})
+
+    def test_per_game_keys_are_not_application_settings(self):
+        self.assertTrue(schema.PROFILE_KEYS)
+        self.assertFalse(set(schema.PROFILE_KEYS) & {spec.key for spec in schema.all_specs()})
+        self.assertFalse(any(title == "Mods" for title, _specs in schema.SETTINGS_SECTIONS))
+
+    def test_storage_reuses_the_schema_profile_keys(self):
+        self.assertEqual(storage.GAME_PROFILE_KEYS, schema.PROFILE_KEYS)
 
     def test_setting_keys_are_unique(self):
         keys = [spec.key for spec in schema.all_specs()]
@@ -96,8 +105,8 @@ class CoerceTest(unittest.TestCase):
         self.assertEqual(schema.coerce_settings({"mod_view_mode": "TILES"})["mod_view_mode"], "tiles")
 
     def test_flags_are_stored_as_booleans(self):
-        self.assertIs(schema.coerce_settings({"mod_recursive_scan": True})["mod_recursive_scan"], True)
-        self.assertIs(schema.coerce_settings({"mod_recursive_scan": ""})["mod_recursive_scan"], False)
+        self.assertIs(schema.coerce_game_profile({"mod_recursive_scan": True})["mod_recursive_scan"], True)
+        self.assertIs(schema.coerce_game_profile({"mod_recursive_scan": ""})["mod_recursive_scan"], False)
 
     def test_invalid_colors_fall_back_to_the_default_color(self):
         result = schema.coerce_settings({"gui_accent_color": "not a color"})
@@ -107,10 +116,14 @@ class CoerceTest(unittest.TestCase):
         self.assertEqual(schema.coerce_settings({"gui_accent_color": "#ABC"})["gui_accent_color"], "#aabbcc")
 
     def test_text_settings_are_trimmed(self):
-        self.assertEqual(schema.coerce_settings({"link_prefix": "  zz_  "})["link_prefix"], "zz_")
+        self.assertEqual(schema.coerce_settings({"gui_font_family": "  Arial  "})["gui_font_family"], "Arial")
+        self.assertEqual(schema.coerce_game_profile({"link_prefix": "  zz_  "})["link_prefix"], "zz_")
 
     def test_keys_that_are_absent_are_left_alone(self):
         self.assertEqual(schema.coerce_settings({"page_size": "5"}), {"page_size": 5})
+
+    def test_per_game_values_are_ignored_by_the_settings_coercion(self):
+        self.assertEqual(schema.coerce_settings({"page_size": "5", "link_prefix": "zz_"}), {"page_size": 5})
 
     def test_game_profile_coercion_covers_the_profile_fields(self):
         result = schema.coerce_game_profile({"name": " Skyrim ", "mod_recursive_scan": True, "page_size": "9"})

@@ -11,7 +11,6 @@ from mod_manager.models import ModItem
 
 _FAKE_SRC = Path(tempfile.gettempdir()) / "mm_test_source"
 _FAKE_DEST = Path(tempfile.gettempdir()) / "mm_test_game"
-_FAKE_NEW_DEST = Path(tempfile.gettempdir()) / "mm_test_new_game"
 
 
 class CliRequestTests(unittest.TestCase):
@@ -238,25 +237,28 @@ class CliRequestTests(unittest.TestCase):
     def test_settings_set_request_saves_changed_values(self):
         saved = Mock()
         with patch("mod_manager.cli.save_config", saved):
-            code, output = self.run_request(
-                [
-                    "settings",
-                    "set",
-                    "--game-mods-dir",
-                    str(_FAKE_NEW_DEST),
-                    "--page-size",
-                    "25",
-                    "--gui-theme",
-                    "dark",
-                ]
-            )
+            code, output = self.run_request(["settings", "set", "--page-size", "25", "--gui-theme", "dark"])
 
         self.assertEqual(code, 0)
-        self.assertEqual(self.cfg["game_mods_dir"], str(_FAKE_NEW_DEST))
         self.assertEqual(self.cfg["page_size"], 25)
         self.assertEqual(self.cfg["gui_theme"], "dark")
         saved.assert_called_once_with(self.cfg)
         self.assertIn("Saved.", output)
+
+    def test_settings_set_request_rejects_per_game_flags(self):
+        for flag in ("--game-mods-dir", "--mods-source-dir", "--mod-extensions", "--link-prefix"):
+            with self.subTest(flag=flag), patch("sys.stderr", io.StringIO()):
+                with self.assertRaises(SystemExit) as caught:
+                    self.run_request(["settings", "set", flag, "x"])
+                self.assertEqual(caught.exception.code, 2)
+
+    def test_settings_set_request_leaves_per_game_values_alone(self):
+        with patch("mod_manager.cli.save_config"):
+            code, _output = self.run_request(["settings", "set", "--page-size", "25"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(self.cfg["game_mods_dir"], str(_FAKE_DEST))
+        self.assertEqual(self.cfg["mods_source_dir"], str(_FAKE_SRC))
 
     def test_settings_show_request_prints_sorted_config_without_saving(self):
         with patch("mod_manager.cli.save_config") as save_config:

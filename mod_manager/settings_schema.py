@@ -208,13 +208,16 @@ MODS_VIEW_FIELDS = (
 )
 
 SETTINGS_SECTIONS = (
-    ("Mods", MODS_FIELDS),
     ("Lists", LIST_FIELDS),
     ("Appearance", APPEARANCE_FIELDS),
     ("Mods view", MODS_VIEW_FIELDS),
 )
 
 GAME_PROFILE_FIELDS = (GAME_NAME_FIELD, *MODS_FIELDS)
+
+PROFILE_KEYS = tuple(spec.key for spec in MODS_FIELDS)
+
+NON_SETTING_KEYS = INTERNAL_KEYS | frozenset(PROFILE_KEYS)
 
 
 def all_specs() -> tuple[FieldSpec, ...]:

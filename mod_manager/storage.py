@@ -8,7 +8,8 @@ from typing import Dict, List
 
 from app_paths import CONFIG_PATH, PRESETS_PATH, LABELS_PATH, PROFILE_DATA_DIR, DEFAULT_CONFIG
 
-GAME_PROFILE_KEYS = ("game_mods_dir", "mods_source_dir", "mod_extensions", "mod_recursive_scan", "link_prefix")
+from .settings_schema import PROFILE_KEYS as GAME_PROFILE_KEYS
+
 FAVORITES_KEY = "__favorites__"
 DEFAULT_FAVORITE_SCOPE = "__default__"
 
@@ -33,15 +34,7 @@ def load_config() -> Dict:
     return cfg
 
 def save_config(cfg: Dict) -> None:
-    active_id = str(cfg.get("active_game_profile_id") or "")
-    for profile in cfg.get("game_profiles", []) or []:
-        if isinstance(profile, dict) and profile.get("id") == active_id:
-            for key in GAME_PROFILE_KEYS:
-                if key in cfg:
-                    profile[key] = cfg.get(key, "")
-            break
-    cfg = normalize_game_profiles(dict(cfg))
-    save_json(CONFIG_PATH, cfg)
+    save_json(CONFIG_PATH, normalize_game_profiles(dict(cfg)))
 
 def _now_iso() -> str:
     return datetime.now().replace(microsecond=0).isoformat(sep=" ")

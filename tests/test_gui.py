@@ -24,7 +24,6 @@ except ModuleNotFoundError:
     QtWidgets = None
 
 _FAKE_DROP = Path(tempfile.gettempdir()) / "mm_test_drop"
-_FAKE_NEW_DEST = Path(tempfile.gettempdir()) / "mm_test_new_game"
 
 
 @unittest.skipIf(QtWidgets is None, "PySide6 is not installed")
@@ -637,13 +636,10 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.mod_selection_widgets[0].sizePolicy().horizontalPolicy(), QtWidgets.QSizePolicy.Fixed)
 
     def test_dialog_fields_expand_to_available_width(self):
-        for key in ("mods_source_dir", "game_mods_dir"):
-            self.assertEqual(self.window.setting_widgets[key].sizePolicy().horizontalPolicy(), QtWidgets.QSizePolicy.Expanding)
         self.assertEqual(
             self.window.setting_widgets["page_size"].sizePolicy().horizontalPolicy(),
             QtWidgets.QSizePolicy.Fixed,
         )
-        self.assertEqual(self.window.setting_widgets["mods_source_dir"].maximumWidth(), 16777215)
         presets_header = self.window.presets_table.horizontalHeader()
         self.assertFalse(presets_header.stretchLastSection())
         self.assertEqual(presets_header.sectionResizeMode(0), QtWidgets.QHeaderView.Stretch)
@@ -705,8 +701,6 @@ class GuiTests(unittest.TestCase):
         self.window._open_settings_dialog()
         self.window.setting_widgets["page_size"].setText("25")
         self.window.setting_widgets["ui_scale_percent"].setText("150")
-        self.window.setting_widgets["game_mods_dir"].setText(str(_FAKE_NEW_DEST))
-        self.window.setting_widgets["mod_extensions"].setText(".pak")
         self.window.setting_widgets["mod_view_mode"].setCurrentText("tiles")
         self.window.setting_widgets["tile_size"].setText("188")
         font_widget = self.window.setting_widgets["gui_font_family"]
@@ -718,8 +712,6 @@ class GuiTests(unittest.TestCase):
             self.window._save_settings()
 
         self.assertEqual(self.window.cfg["page_size"], 25)
-        self.assertEqual(self.window.cfg["game_mods_dir"], str(_FAKE_NEW_DEST))
-        self.assertEqual(self.window.cfg["mod_extensions"], ".pak")
         self.assertEqual(self.window.cfg["mod_view_mode"], "tiles")
         self.assertEqual(self.window.cfg["tile_size"], 188)
         self.assertEqual(self.window.cfg["gui_font_family"], selected_font)
@@ -728,20 +720,7 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(self.window.context.status_text, "Settings saved.")
         self.assertFalse(self.window.settings_dialog.isVisible())
 
-    def test_save_settings_includes_recursive_scan_checkbox(self):
-        self.window._run_action = self.run_action_inline
-        self.window._open_settings_dialog()
-        recursive_widget = self.window.setting_widgets["mod_recursive_scan"]
-        self.assertIsInstance(recursive_widget, QtWidgets.QCheckBox)
-        self.assertFalse(recursive_widget.isChecked())
-        recursive_widget.setChecked(True)
-
-        with patch("mod_manager.storage.save_config"), patch.object(self.window, "refresh_all"):
-            self.window._save_settings()
-
-        self.assertEqual(self.window.cfg["mod_recursive_scan"], True)
-
-    def test_game_profile_dialog_has_recursive_checkbox_next_to_extensions(self):
+    def test_game_profile_dialog_owns_the_per_game_fields(self):
         with patch.object(QtWidgets.QDialog, "exec", return_value=QtWidgets.QDialog.Accepted):
             values = self.window._game_profile_values({
                 "name": "My Game",
@@ -751,6 +730,8 @@ class GuiTests(unittest.TestCase):
 
         self.assertEqual(values["mod_extensions"], ".pak,.utoc")
         self.assertEqual(values["mod_recursive_scan"], True)
+        for key in ("mods_source_dir", "game_mods_dir", "link_prefix"):
+            self.assertIn(key, values, key)
 
     def test_save_theme_setting_applies_live_without_restart(self):
         self.window._run_action = self.run_action_inline
