@@ -6,7 +6,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from mod_manager.models import ModItem
-from mod_manager.mods import discover_mods, import_mod_image, is_mod_file, mod_image_path, mods_view, parse_extensions
+from mod_manager.mods import (
+    discover_mods,
+    import_mod_image,
+    is_mod_file,
+    mod_image_path,
+    mods_view,
+    parse_extensions,
+    parse_group_extensions,
+)
 
 
 class ParseExtensionsTests(unittest.TestCase):
@@ -28,6 +36,16 @@ class ParseExtensionsTests(unittest.TestCase):
     def test_folders_only_excludes_all_files(self):
         self.assertEqual(parse_extensions({"mod_extensions": "folders"}), (False, [], True))
 
+    def test_grouped_extensions_are_normalized_in_their_configured_order(self):
+        self.assertEqual(
+            parse_group_extensions({"mod_group_extensions": ".PAK, utoc ,.ucas,.pak"}),
+            [".pak", ".utoc", ".ucas"],
+        )
+
+    def test_grouped_extensions_always_count_as_mod_files(self):
+        cfg = {"mod_extensions": ".pak", "mod_group_extensions": ".utoc,.ucas"}
+        self.assertEqual(parse_extensions(cfg), (False, [".pak", ".utoc", ".ucas"], False))
+
 
 class DiscoverModsTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -45,8 +63,10 @@ class DiscoverModsTests(unittest.TestCase):
             "mods_source_dir": str(self.src),
             "game_mods_dir": str(self.dst),
             "mod_extensions": "",
+            "mod_group_extensions": "",
             "mod_recursive_scan": False,
             "link_prefix": "",
+            "install_mode": "link",
         }
         cfg.update(overrides)
         return cfg
@@ -139,6 +159,111 @@ class DiscoverModsTests(unittest.TestCase):
 
         cfg_with_folders = self._cfg(mod_extensions=".pak,folders")
         self.assertTrue(is_mod_file(folder, cfg_with_folders))
+
+
+class GroupedModTests(unittest.TestCase):
+    GROUP = ".pak,.utoc,.ucas"
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.src = Path(self.tmp.name) / "source"
+        self.dst = Path(self.tmp.name) / "game"
+        self.src.mkdir()
+        self.dst.mkdir()
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _cfg(self, **overrides) -> dict:
+        cfg = {
+            "mods_source_dir": str(self.src),
+            "game_mods_dir": str(self.dst),
+            "mod_extensions": ".pak,.utoc,.ucas",
+            "mod_group_extensions": self.GROUP,
+            "mod_recursive_scan": False,
+            "link_prefix": "",
+            "install_mode": "link",
+        }
+        cfg.update(overrides)
+        return cfg
+
+    def _touch_group(self, folder: Path, stem: str, suffixes=(".pak", ".utoc", ".ucas")) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        for suffix in suffixes:
+            (folder / f"{stem}{suffix}").touch()
+
+    def test_matching_files_become_one_mod_named_after_the_first_grouped_extension(self):
+        self._touch_group(self.src, "Weapon")
+
+        items = discover_mods(self._cfg())
+
+        self.assertEqual([item.name for item in items], ["Weapon.pak"])
+        self.assertEqual(
+            sorted(f.src.name for f in items[0].install_files),
+            ["Weapon.pak", "Weapon.ucas", "Weapon.utoc"],
+        )
+
+    def test_the_primary_member_follows_the_configured_extension_order(self):
+        self._touch_group(self.src, "Weapon")
+
+        items = discover_mods(self._cfg(mod_group_extensions=".ucas,.utoc,.pak"))
+
+        self.assertEqual([item.name for item in items], ["Weapon.ucas"])
+        self.assertEqual(items[0].src, self.src / "Weapon.ucas")
+
+    def test_a_group_counts_as_installed_only_when_every_member_is_present(self):
+        self._touch_group(self.src, "Weapon")
+        (self.dst / "Weapon.pak").touch()
+        (self.dst / "Weapon.utoc").touch()
+
+        self.assertFalse(discover_mods(self._cfg())[0].installed)
+
+        (self.dst / "Weapon.ucas").touch()
+        self.assertTrue(discover_mods(self._cfg())[0].installed)
+
+    def test_files_outside_the_grouped_list_stay_separate_mods(self):
+        self._touch_group(self.src, "Weapon")
+        (self.src / "Weapon.txt").touch()
+
+        items = discover_mods(self._cfg(mod_extensions=".pak,.utoc,.ucas,.txt"))
+
+        self.assertEqual(sorted(item.name for item in items), ["Weapon.pak", "Weapon.txt"])
+
+    def test_grouping_never_merges_the_same_name_from_different_subfolders(self):
+        self._touch_group(self.src / "First", "Weapon")
+        self._touch_group(self.src / "Second", "Weapon")
+
+        items = discover_mods(self._cfg(mod_recursive_scan=True))
+
+        self.assertEqual([item.name for item in items], ["Weapon.pak", "Weapon.pak"])
+        self.assertEqual(
+            sorted(str(item.src.parent.name) for item in items),
+            ["First", "Second"],
+        )
+
+    def test_a_lone_grouped_file_is_still_a_normal_mod(self):
+        (self.src / "Solo.pak").touch()
+
+        items = discover_mods(self._cfg())
+
+        self.assertEqual([item.name for item in items], ["Solo.pak"])
+        self.assertEqual(items[0].files, ())
+
+    def test_the_link_prefix_still_applies_to_every_member(self):
+        self._touch_group(self.src, "Weapon")
+
+        items = discover_mods(self._cfg(link_prefix="_P"))
+
+        self.assertEqual(
+            sorted(f.dest.name for f in items[0].install_files),
+            ["Weapon_P.pak", "Weapon_P.ucas", "Weapon_P.utoc"],
+        )
+
+    def test_the_install_mode_of_the_profile_reaches_every_mod(self):
+        (self.src / "Solo.pak").touch()
+
+        self.assertFalse(discover_mods(self._cfg())[0].copy_install)
+        self.assertTrue(discover_mods(self._cfg(install_mode="copy"))[0].copy_install)
 
 
 class ModsViewFavoriteTests(unittest.TestCase):

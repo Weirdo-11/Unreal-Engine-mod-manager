@@ -18,6 +18,8 @@ from mod_manager.ui.theme import tokens
 
 try:
     from PySide6 import QtCore, QtGui, QtWidgets
+
+    from mod_manager.ui.dialogs.game_profile import GameProfileDialog
 except ModuleNotFoundError:
     QtCore = None
     QtGui = None
@@ -551,7 +553,7 @@ class GuiTests(unittest.TestCase):
         ) as refresh_mods, patch.object(self.window, "refresh_presets") as refresh_presets:
             self.window._install_page()
 
-        apply_mods.assert_called_once_with(self.window.cfg, 2, "combat", "pak", "default")
+        apply_mods.assert_called_once_with(self.window.cfg, 2, "combat", "pak", "default", False, True)
         self.assertEqual(self.window.context.status_text, "Installed 2/3 on page 2. Errors: 1.")
         refresh_mods.assert_called_once_with()
         refresh_presets.assert_called_once_with()
@@ -562,7 +564,7 @@ class GuiTests(unittest.TestCase):
         ) as refresh_mods, patch.object(self.window, "refresh_presets"):
             self.window._toggle_selected_mods()
 
-        toggle_mods.assert_called_once_with(self.mods, [1, 2])
+        toggle_mods.assert_called_once_with(self.mods, [1, 2], True)
         refresh_mods.assert_called_once_with(["combat.pak", "ui.pak"])
         self.assertEqual(self.window.context.status_text, "Toggled")
 
@@ -733,6 +735,24 @@ class GuiTests(unittest.TestCase):
         for key in ("mods_source_dir", "game_mods_dir", "link_prefix"):
             self.assertIn(key, values, key)
 
+    def test_game_profile_dialog_offers_the_install_method_and_grouping(self):
+        dialog = GameProfileDialog(self.window, {"name": "My Game", "install_mode": "copy"})
+        try:
+            method = dialog.form.fields["install_mode"]
+            self.assertIsInstance(method, QtWidgets.QComboBox)
+            self.assertEqual([method.itemText(i) for i in range(method.count())], ["link", "copy"])
+            self.assertEqual(method.currentText(), "copy")
+            self.assertIsInstance(dialog.form.fields["mod_group_extensions"], QtWidgets.QLineEdit)
+
+            dialog.form.fields["mod_group_extensions"].setText(".pak,.utoc,.ucas")
+            with patch.object(QtWidgets.QDialog, "exec", return_value=QtWidgets.QDialog.Accepted):
+                values = dialog.values()
+        finally:
+            dispose(dialog)
+
+        self.assertEqual(values["install_mode"], "copy")
+        self.assertEqual(values["mod_group_extensions"], ".pak,.utoc,.ucas")
+
     def test_save_theme_setting_applies_live_without_restart(self):
         self.window._run_action = self.run_action_inline
         self.window._open_settings_dialog()
@@ -886,7 +906,7 @@ class GuiTests(unittest.TestCase):
         ), patch.object(self.window, "refresh_presets"):
             self.window._toggle_selected_presets()
 
-        toggle.assert_called_once_with(self.window.cfg, ["core", "ui"], {"combat.pak"})
+        toggle.assert_called_once_with(self.window.cfg, ["core", "ui"], {"combat.pak"}, True)
         self.assertEqual(self.window.context.status_text, "Preset toggled")
         self.assertFalse(self.window.presets_dialog.isVisible())
 
@@ -908,7 +928,7 @@ class GuiTests(unittest.TestCase):
         ), patch.object(self.window, "refresh_presets"):
             self.window.presets_table.doubleClicked.emit(self.window.presets_model.index(1, 0))
 
-        toggle.assert_called_once_with(self.window.cfg, ["ui"], {"combat.pak"})
+        toggle.assert_called_once_with(self.window.cfg, ["ui"], {"combat.pak"}, True)
         self.assertEqual(self.window.context.status_text, "Preset toggled")
         self.assertFalse(self.window.presets_dialog.isVisible())
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from typing import Dict, List
+from typing import Callable, Dict, List
 
 from app_paths import APP_NAME, APP_VERSION
 
@@ -13,14 +13,20 @@ from .mods import (
     apply_mods_page,
     deactivate_mod,
     deactivate_mods_page,
+    existing_targets,
+    is_copy_install,
     list_broken_links,
+    mods_by_indexes,
     mods_view,
+    overwrite_message,
     remove_favorites_from_mods,
     remove_label_from_mods,
     toggle_mods_by_indexes,
 )
 from .presets import (
     delete_presets_by_indexes,
+    preset_mods_to_install,
+    preset_names_by_indexes,
     presets_view,
     save_preset_from_installed,
     toggle_presets_by_indexes,
@@ -69,6 +75,24 @@ def _order(value: str) -> str:
         return aliases[v]
     raise argparse.ArgumentTypeError("order must be one of: default, created_date, name, label, installed, last_managed, with optional '-' prefix or ' desc'")
 
+OVERWRITE_HELP = "Replace files that already exist in the game mods folder when the profile installs by copy."
+
+def _add_overwrite_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--overwrite", action="store_true", help=OVERWRITE_HELP)
+
+def _add_profile_args(parser: argparse.ArgumentParser, use_defaults: bool) -> None:
+    """Build the per game profile flags from the shared schema so the lists cannot drift."""
+    for spec in settings_schema.MODS_FIELDS:
+        flag = "--" + spec.key.replace("_", "-")
+        if spec.kind == settings_schema.FLAG:
+            default = False if use_defaults else None
+            parser.add_argument(flag, action=argparse.BooleanOptionalAction, default=default, help=spec.tooltip)
+        elif spec.kind == settings_schema.CHOICE:
+            default = spec.choices[0] if use_defaults else None
+            parser.add_argument(flag, choices=list(spec.choices), default=default, help=spec.tooltip)
+        else:
+            parser.add_argument(flag, default="" if use_defaults else None, help=spec.tooltip)
+
 def _add_view_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--page", type=int, default=1)
     parser.add_argument("--label", default="")
@@ -104,6 +128,28 @@ def _print_presets(cfg: Dict, page: int) -> int:
         print("No presets saved.")
     return 0
 
+OVERWRITE_HINT = "Re-run with --overwrite to replace them."
+
+def _allow_overwrite(cfg: Dict, pending: Callable[[], List], overwrite: bool) -> bool:
+    """Print the warning and refuse when a copy install would replace existing files."""
+    if overwrite or not is_copy_install(cfg):
+        return True
+    names = existing_targets(pending())
+    if not names:
+        return True
+    print(overwrite_message(names))
+    print(OVERWRITE_HINT)
+    return False
+
+def _pending_mods(cfg: Dict, page: int, label: str, search: str, order: str, favorite_only: bool) -> List:
+    _items, shown, _page, _pages, _labels = _filtered_mods_view(cfg, page, label, search, order, favorite_only)
+    return [m for m in shown if not m.installed]
+
+def _pending_preset_mods(cfg: Dict, args: argparse.Namespace) -> List:
+    names = preset_names_by_indexes(cfg, args.page, args.indexes)
+    work, _missing = preset_mods_to_install(cfg, names)
+    return work
+
 def _selected_mod_names(
     cfg: Dict,
     page: int,
@@ -126,8 +172,10 @@ def _run_mods(args: argparse.Namespace, cfg: Dict) -> int:
         order = args.mode if args.mods_cmd == "order" else args.order
         return _print_mods(cfg, page, label, search, order, args.favorite)
     if args.mods_cmd == "install":
-        view_args = (cfg, args.page, args.label, args.search, args.order)
-        page, total, err = apply_mods_page(*view_args, True) if args.favorite else apply_mods_page(*view_args)
+        view_args = (cfg, args.page, args.label, args.search, args.order, args.favorite)
+        if not _allow_overwrite(cfg, lambda: _pending_mods(*view_args), args.overwrite):
+            return 1
+        page, total, err = apply_mods_page(*view_args, args.overwrite)
         print(f"Installed {total - err}/{total} on page {page}. Errors: {err}.")
         return 1 if err else 0
     if args.mods_cmd == "uninstall":
@@ -139,7 +187,10 @@ def _run_mods(args: argparse.Namespace, cfg: Dict) -> int:
         _items, shown, _page, _pages, _labels = _filtered_mods_view(
             cfg, args.page, args.label, args.search, args.order, args.favorite
         )
-        msg = toggle_mods_by_indexes(shown, args.indexes)
+        pending = [m for m in mods_by_indexes(shown, args.indexes) if not m.installed]
+        if not _allow_overwrite(cfg, lambda: pending, args.overwrite):
+            return 1
+        msg = toggle_mods_by_indexes(shown, args.indexes, args.overwrite)
         print(msg or "No mods toggled.")
         return 0
     if args.mods_cmd == "label-add":
@@ -182,7 +233,11 @@ def _run_presets(args: argparse.Namespace, cfg: Dict) -> int:
         return 0
     if args.presets_cmd == "toggle":
         installed = {m.name for m in mods_view(cfg, 1, "", "", "d")[0] if m.installed}
-        msg, messages, has_errors = toggle_presets_by_indexes(cfg, args.page, args.indexes, installed)
+        if not _allow_overwrite(cfg, lambda: _pending_preset_mods(cfg, args), args.overwrite):
+            return 1
+        msg, messages, has_errors = toggle_presets_by_indexes(
+            cfg, args.page, args.indexes, installed, args.overwrite
+        )
         print(msg or "No presets toggled.")
         for item in messages:
             print(" - ", item)
@@ -293,6 +348,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ["list", "install", "uninstall", "toggle"]:
         p = mods_sub.add_parser(name)
         _add_view_args(p)
+        if name in {"install", "toggle"}:
+            _add_overwrite_arg(p)
     p = mods_sub.add_parser("search")
     p.add_argument("text")
     p.add_argument("--page", type=int, default=1)
@@ -345,6 +402,8 @@ def build_parser() -> argparse.ArgumentParser:
         p = presets_sub.add_parser(name)
         p.add_argument("indexes", type=_indexes)
         p.add_argument("--page", type=int, default=1)
+        if name == "toggle":
+            _add_overwrite_arg(p)
 
     settings = sub.add_parser("settings")
     settings_sub = settings.add_subparsers(dest="settings_cmd", required=True)
@@ -370,19 +429,11 @@ def build_parser() -> argparse.ArgumentParser:
     games_delete.add_argument("profile_id")
     games_add = games_sub.add_parser("add")
     games_add.add_argument("name")
-    games_add.add_argument("--game-mods-dir", default="")
-    games_add.add_argument("--mods-source-dir", default="")
-    games_add.add_argument("--mod-extensions", default="")
-    games_add.add_argument("--mod-recursive-scan", action=argparse.BooleanOptionalAction, default=False)
-    games_add.add_argument("--link-prefix", default="")
+    _add_profile_args(games_add, use_defaults=True)
     games_edit = games_sub.add_parser("edit")
     games_edit.add_argument("profile_id")
     games_edit.add_argument("--name")
-    games_edit.add_argument("--game-mods-dir")
-    games_edit.add_argument("--mods-source-dir")
-    games_edit.add_argument("--mod-extensions")
-    games_edit.add_argument("--mod-recursive-scan", action=argparse.BooleanOptionalAction, default=None)
-    games_edit.add_argument("--link-prefix")
+    _add_profile_args(games_edit, use_defaults=False)
 
     open_parser = sub.add_parser("open")
     open_parser.add_argument("target", choices=["source", "game"])

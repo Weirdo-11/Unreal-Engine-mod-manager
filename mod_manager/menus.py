@@ -7,9 +7,9 @@ from typing import Dict, List, Tuple
 
 from app_paths import APP_NAME, APP_VERSION, PRINT_SIZE
 
+from . import settings_schema
 from .platform_utils import is_windows
 from .storage import (
-    GAME_PROFILE_KEYS,
     create_game_profile,
     delete_game_profile,
     game_abbreviation,
@@ -20,10 +20,13 @@ from .storage import (
 )
 from .mods import (
     discover_mods,
+    existing_targets,
     list_broken_links,
     deactivate_mod,
+    mods_by_indexes,
     mods_view,
     add_label_to_mods,
+    overwrite_message,
     remove_label_from_mods,
     deactivate_mods_page,
     apply_mods_page,
@@ -44,6 +47,18 @@ from .cli_utils import (
     truncate_text,
     format_order_short,
 )
+
+def _ask_yes_no(question: str, current: bool = False) -> bool:
+    answer = prompt(f"{question} (y/n) [{'y' if current else 'n'}]: ").strip().lower()
+    return (answer in {"y", "yes"}) if answer else current
+
+def _confirm_overwrite(mods: List) -> bool | None:
+    """None cancels the operation, otherwise whether existing files may be replaced."""
+    names = existing_targets(mods)
+    if not names:
+        return False
+    print(overwrite_message(names))
+    return True if _ask_yes_no("Replace them?") else None
 
 def _clear():
     os.system("cls" if is_windows() else "clear")
@@ -242,23 +257,17 @@ def _prompt_game_profile(existing: Dict | None = None) -> Dict | None:
         print("Canceled - empty game name.")
         return None
     values = {"name": name}
-    labels = {
-        "game_mods_dir": "Game mods folder",
-        "mods_source_dir": "Mods source folder",
-        "mod_extensions": "Mod file extensions (e.g. .pak,.utoc; add 'folders' to include subfolders)",
-        "mod_recursive_scan": "Recursively scan subfolders for mods",
-        "link_prefix": "Link prefix",
-    }
-    for key in GAME_PROFILE_KEYS:
-        if key == "mod_recursive_scan":
-            current_bool = bool(existing.get(key))
-            answer = prompt(f"{labels[key]} (y/n) [{'y' if current_bool else 'n'}]: ").strip().lower()
-            values[key] = (answer in {"y", "yes"}) if answer else current_bool
+    for spec in settings_schema.MODS_FIELDS:
+        if spec.kind == settings_schema.FLAG:
+            values[spec.key] = _ask_yes_no(spec.label, bool(existing.get(spec.key)))
             continue
-        current = str(existing.get(key, ""))
-        value = prompt(f"{labels[key]} [{current}]: ").strip().strip('"')
-        values[key] = str(Path(value).expanduser()) if value and key.endswith("_dir") else (value or current)
-    return values
+        current = str(existing.get(spec.key, ""))
+        hint = f" ({'/'.join(spec.choices)})" if spec.kind == settings_schema.CHOICE else ""
+        value = prompt(f"{spec.label}{hint} [{current}]: ").strip().strip('"')
+        if spec.kind == settings_schema.PATH and value:
+            value = str(Path(value).expanduser())
+        values[spec.key] = value or current
+    return settings_schema.coerce_game_profile(values)
 
 def menu_games(cfg: Dict):
     while True:
@@ -417,14 +426,19 @@ def menu_mods_toggle(cfg: Dict):
                     target_page, _count = deactivate_mods_page(cfg, target_page, label_filter, search_query, order_mode)
                     last_operation = f"All on page {target_page} uninstalled."
                 else:
-                    target_page, total, err = apply_mods_page(cfg, target_page, label_filter, search_query, order_mode)
+                    overwrite = _confirm_overwrite([m for m in shown if not m.installed])
+                    if overwrite is None:
+                        continue
+                    target_page, total, err = apply_mods_page(
+                        cfg, target_page, label_filter, search_query, order_mode, False, overwrite
+                    )
                     if total > 0 and err > 0:
                         pause()
                     last_operation = f"Installed {total - err}/{total} on page {target_page}. Errors: {err}."
                 continue
             if cmd in ["toggle"]:
                 nums = parse_multi_choice(" ".join(args))
-                last_operation = toggle_mods_by_indexes(shown, nums)
+                last_operation = _toggle_shown(shown, nums)
                 continue
             if cmd == "/":
                 continue
@@ -477,7 +491,12 @@ def menu_mods_toggle(cfg: Dict):
             last_operation = "All on this page uninstalled."
             continue
         if low == "i":
-            _target_page, total, err = apply_mods_page(cfg, page, label_filter, search_query, order_mode)
+            overwrite = _confirm_overwrite([m for m in shown if not m.installed])
+            if overwrite is None:
+                continue
+            _target_page, total, err = apply_mods_page(
+                cfg, page, label_filter, search_query, order_mode, False, overwrite
+            )
             if total > 0 and err > 0:
                 pause()
             continue
@@ -486,7 +505,13 @@ def menu_mods_toggle(cfg: Dict):
             page = page_sel
             continue
         nums = parse_multi_choice(choice)
-        last_operation = toggle_mods_by_indexes(shown, nums)
+        last_operation = _toggle_shown(shown, nums)
+
+def _toggle_shown(shown: List, indexes: List[int]) -> str:
+    overwrite = _confirm_overwrite([m for m in mods_by_indexes(shown, indexes) if not m.installed])
+    if overwrite is None:
+        return "Canceled."
+    return toggle_mods_by_indexes(shown, indexes, overwrite)
 
 def menu_presets(cfg: Dict):
     if not ensure_paths(cfg):

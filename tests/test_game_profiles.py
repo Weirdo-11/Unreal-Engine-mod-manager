@@ -234,6 +234,35 @@ class GameProfileCliTests(unittest.TestCase):
         self.assertEqual(cfg["active_game_profile_id"], profile["id"])
         self.assertTrue(saved)
 
+    def test_games_add_stores_the_install_method_and_grouped_extensions(self):
+        cfg = {"game_profiles": [], "active_game_profile_id": ""}
+
+        with patch("mod_manager.cli.load_config", return_value=cfg), patch("mod_manager.cli.save_config"):
+            code = run_cli([
+                "games", "add", "Stalker Two",
+                "--install-mode", "copy",
+                "--mod-group-extensions", ".pak,.utoc,.ucas",
+            ])
+
+        self.assertEqual(code, 0)
+        profile = cfg["game_profiles"][0]
+        self.assertEqual(profile["install_mode"], "copy")
+        self.assertEqual(profile["mod_group_extensions"], ".pak,.utoc,.ucas")
+
+    def test_games_edit_changes_only_the_flags_that_were_passed(self):
+        cfg = {"game_profiles": [], "active_game_profile_id": ""}
+
+        with patch("mod_manager.cli.load_config", return_value=cfg), patch("mod_manager.cli.save_config"):
+            run_cli(["games", "add", "Stalker Two", "--install-mode", "copy", "--link-prefix", "_P"])
+            profile_id = cfg["game_profiles"][0]["id"]
+            code = run_cli(["games", "edit", profile_id, "--mod-group-extensions", ".pak,.utoc"])
+
+        self.assertEqual(code, 0)
+        profile = cfg["game_profiles"][0]
+        self.assertEqual(profile["mod_group_extensions"], ".pak,.utoc")
+        self.assertEqual(profile["install_mode"], "copy")
+        self.assertEqual(profile["link_prefix"], "_P")
+
 
 if __name__ == "__main__":
     unittest.main()

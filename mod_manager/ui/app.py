@@ -17,14 +17,18 @@ from ..mods import (
     apply_mods_page,
     deactivate_mod,
     deactivate_mods_page,
+    existing_targets,
     import_mod_file,
+    is_copy_install,
     import_mod_image,
     is_image_file,
     is_mod_file,
     list_broken_links,
     list_installed_mods,
     mod_image_path,
+    mods_by_indexes,
     mods_records,
+    overwrite_message,
     mods_view,
     remove_label_from_mods,
     remove_favorites_from_mods,
@@ -32,6 +36,7 @@ from ..mods import (
 )
 from ..presets import (
     delete_presets_by_names,
+    preset_mods_to_install,
     presets_records,
     presets_view,
     save_preset_from_installed,
@@ -108,6 +113,9 @@ from .view_modes import (
     sort_key_for_column,
 )
 from ..workers import _run_import_batch
+
+OVERWRITE_TITLE = "Overwrite files"
+OVERWRITE_QUESTION = "{message}\n\nReplace them?"
 
 
 class _Var:
@@ -1084,6 +1092,14 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self.mod_page.set(1)
         self.refresh_mods()
 
+    def _confirm_overwrite(self, mods: list) -> bool:
+        """Ask before a copy install replaces files that are already in the game mods folder."""
+        names = existing_targets(mods)
+        if not names:
+            return True
+        question = OVERWRITE_QUESTION.format(message=overwrite_message(names))
+        return prompts.ask_yes_no(self, OVERWRITE_TITLE, question)
+
     def _selected_mod_rows_for_state(self, installed: bool) -> list[int]:
         rows = self._selected_rows(self._current_mod_view())
         return [row + 1 for row in rows if row < len(self.current_mods_shown) and self.current_mods_shown[row].installed == installed]
@@ -1091,14 +1107,21 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _toggle_selected_indexes(self, indexes: list[int]) -> None:
         if not indexes:
             return
-        names = [self.current_mods_shown[i - 1].name for i in indexes if 1 <= i <= len(self.current_mods_shown)]
+        selected = mods_by_indexes(self.current_mods_shown, indexes)
+        if not self._confirm_overwrite([m for m in selected if not m.installed]):
+            return
+        names = [m.name for m in selected]
 
         def done(message):
             self._set_status(message)
             self.refresh_mods(names)
             self.refresh_presets()
 
-        self._run_action("Updating selected mods...", lambda: toggle_mods_by_indexes(self.current_mods_shown, indexes), done)
+        self._run_action(
+            "Updating selected mods...",
+            lambda: toggle_mods_by_indexes(self.current_mods_shown, indexes, True),
+            done,
+        )
 
     def _install_selected_mods(self) -> None:
         self._toggle_selected_indexes(self._selected_mod_rows_for_state(False))
@@ -1184,6 +1207,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
         self._detail_favorite_row(mod)
         self._detail_state_action_row(mod)
         self._detail_dates_row(mod)
+        if mod.files:
+            self._detail_row("Grouped files", ", ".join(f.src.name for f in mod.files))
         self._detail_path_row("Source", mod.src)
         self._detail_path_row("Destination", mod.dest)
         self._detail_image(mod.name)
@@ -1328,6 +1353,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
 
     def _install_page(self) -> None:
         page, label_filter, search, order = self._view_args()
+        if not self._confirm_overwrite([m for m in self.current_mods_shown if not m.installed]):
+            return
 
         def done(result):
             target_page, total, errors = result
@@ -1335,14 +1362,9 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.refresh_mods()
             self.refresh_presets()
 
-        view_args = (self.cfg, page, label_filter, search, order)
-        self._run_action(
-            "Installing mods...",
-            lambda: apply_mods_page(*view_args, True)
-            if self.favorite_filter_var.get()
-            else apply_mods_page(*view_args),
-            done,
-        )
+        favorite_only = bool(self.favorite_filter_var.get())
+        view_args = (self.cfg, page, label_filter, search, order, favorite_only, True)
+        self._run_action("Installing mods...", lambda: apply_mods_page(*view_args), done)
 
     def _uninstall_page(self) -> None:
         page, label_filter, search, order = self._view_args()
@@ -1363,15 +1385,7 @@ class ModManagerGui(QtWidgets.QMainWindow):
         )
 
     def _toggle_selected_mods(self) -> None:
-        indexes = self._selected_indexes()
-        names = [self.current_mods_shown[i - 1].name for i in indexes if 1 <= i <= len(self.current_mods_shown)]
-
-        def done(message):
-            self._set_status(message)
-            self.refresh_mods(names)
-            self.refresh_presets()
-
-        self._run_action("Toggling mods...", lambda: toggle_mods_by_indexes(self.current_mods_shown, indexes), done)
+        self._toggle_selected_indexes(self._selected_indexes())
 
     def _selected_mod_names(self) -> list[str]:
         return [self.current_mods_shown[i - 1].name for i in self._selected_indexes() if 1 <= i <= len(self.current_mods_shown)]
@@ -1418,6 +1432,8 @@ class ModManagerGui(QtWidgets.QMainWindow):
     def _toggle_selected_presets(self) -> None:
         names = self._selected_preset_names()
         installed = {m.name for m in list_installed_mods(self.cfg)}
+        if is_copy_install(self.cfg) and not self._confirm_overwrite(preset_mods_to_install(self.cfg, names)[0]):
+            return
 
         def done(result):
             message, _messages, _has_errors = result
@@ -1426,7 +1442,11 @@ class ModManagerGui(QtWidgets.QMainWindow):
             self.refresh_presets()
             self._close_dialog(self.presets_dialog)
 
-        self._run_action("Toggling presets...", lambda: toggle_presets_by_names(self.cfg, names, installed), done)
+        self._run_action(
+            "Toggling presets...",
+            lambda: toggle_presets_by_names(self.cfg, names, installed, True),
+            done,
+        )
 
     def _toggle_preset_at_index(self, index) -> None:
         if index.isValid() and self.presets_table.selectionModel():

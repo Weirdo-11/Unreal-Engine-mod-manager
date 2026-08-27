@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 import tempfile
@@ -8,12 +9,15 @@ from typing import List, Tuple
 
 from .platform_utils import is_windows
 
+TARGET_EXISTS = "Target already exists: {}"
+SOURCE_MISSING = "Source not found: {}"
+
 def mklink(src: Path, dest: Path) -> Tuple[bool, str]:
     try:
         if dest.exists() or dest.is_symlink():
-            return False, f"Target already exists: {dest}"
+            return False, TARGET_EXISTS.format(dest)
         if not src.exists():
-            return False, f"Source not found: {src}"
+            return False, SOURCE_MISSING.format(src)
 
         if is_windows():
             if src.is_dir():
@@ -48,10 +52,10 @@ def mklink_batch(items: List[Tuple[Path, Path, bool]]) -> List[Tuple[bool, str]]
         bat_path = f.name
         for i, (src, dest, is_dir) in enumerate(items):
             if dest.exists() or dest.is_symlink():
-                results[i] = (False, f"Target already exists: {dest}")
+                results[i] = (False, TARGET_EXISTS.format(dest))
                 continue
             if not src.exists():
-                results[i] = (False, f"Source not found: {src}")
+                results[i] = (False, SOURCE_MISSING.format(src))
                 continue
 
             work_idxs.append(i)
@@ -147,6 +151,41 @@ def unlink_path(path: Path) -> Tuple[bool, str]:
                 os.rmdir(path)
             except OSError:
                 return False, "Not a link or not empty"
+        else:
+            path.unlink()
+        return True, "OK"
+    except Exception as e:
+        return False, str(e)
+
+def copy_path(src: Path, dest: Path, overwrite: bool = False) -> Tuple[bool, str]:
+    try:
+        if not src.exists():
+            return False, SOURCE_MISSING.format(src)
+        if dest.exists() or dest.is_symlink():
+            if not overwrite:
+                return False, TARGET_EXISTS.format(dest)
+            ok, msg = remove_path(dest)
+            if not ok:
+                return False, msg
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if src.is_dir():
+            shutil.copytree(src, dest)
+        else:
+            shutil.copy2(src, dest)
+        return True, "OK"
+    except Exception as e:
+        return False, str(e)
+
+def copy_batch(items: List[Tuple[Path, Path, bool]], overwrite: bool = False) -> List[Tuple[bool, str]]:
+    return [copy_path(src, dest, overwrite) for src, dest, _is_dir in items]
+
+def remove_path(path: Path) -> Tuple[bool, str]:
+    """Remove a link or a copy installed in the game mods folder."""
+    try:
+        if not path.exists() and not path.is_symlink():
+            return False, "Already removed"
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
         else:
             path.unlink()
         return True, "OK"

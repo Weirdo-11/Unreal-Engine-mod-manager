@@ -4,8 +4,8 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from .models import ModItem
-from .links import mklink, mklink_batch, unlink_path
+from .models import ModFile, ModItem
+from .links import copy_batch, mklink, mklink_batch, remove_path, unlink_path
 from .platform_utils import is_windows
 from .storage import (
     ensure_mod_records,
@@ -18,7 +18,7 @@ from .storage import (
 )
 from .cli_utils import filter_items_by_query, page_slice, paginate, sort_items
 
-IMAGE_EXTENSIONS = {".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".ppm", ".pgm"}
+IMAGE_EXTENSIONS = (".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".ppm", ".pgm")
 
 def _name_without_prefix(name: str, link_prefix: str) -> str:
     if not link_prefix:
@@ -32,6 +32,24 @@ def _name_without_prefix(name: str, link_prefix: str) -> str:
 
 FOLDER_TOKENS = {"folder", "folders"}
 
+def _split_tokens(raw: str) -> List[str]:
+    return [token.strip() for token in (raw or "").split(",") if token.strip()]
+
+def _normalize_extensions(tokens: List[str]) -> List[str]:
+    """Lowercase, dot-prefix and de-duplicate extension tokens, keeping their order."""
+    exts: List[str] = []
+    for token in tokens:
+        if token.lower() in FOLDER_TOKENS:
+            continue
+        ext = token.lower() if token.startswith(".") else "." + token.lower()
+        if ext not in exts:
+            exts.append(ext)
+    return exts
+
+def parse_group_extensions(cfg: Dict) -> List[str]:
+    """Extensions joined into one mod by shared file name, in the configured order."""
+    return _normalize_extensions(_split_tokens(cfg.get("mod_group_extensions") or ""))
+
 def parse_extensions(cfg: Dict) -> Tuple[bool, List[str], bool]:
     """Return (show_all, extensions, include_folders) parsed from mod_extensions.
 
@@ -39,14 +57,17 @@ def parse_extensions(cfg: Dict) -> Tuple[bool, List[str], bool]:
     The "folder"/"folders" token (case-insensitive) controls whether
     directories under the source folder are treated as mod units. When
     mod_extensions is empty, every file/extension and folders are allowed
-    (preserves the historical default behavior).
+    (preserves the historical default behavior). Grouped extensions always
+    count as mod files so a group never loses a member to the filter.
     """
-    exts_raw = (cfg.get("mod_extensions") or "").strip()
-    if not exts_raw:
+    tokens = _split_tokens(cfg.get("mod_extensions") or "")
+    if not tokens:
         return True, [], True
-    tokens = [t.strip() for t in exts_raw.split(",") if t.strip()]
-    include_folders = any(t.lower() in FOLDER_TOKENS for t in tokens)
-    exts = [t.lower() if t.startswith(".") else "." + t.lower() for t in tokens if t.lower() not in FOLDER_TOKENS]
+    include_folders = any(token.lower() in FOLDER_TOKENS for token in tokens)
+    exts = _normalize_extensions(tokens)
+    for ext in parse_group_extensions(cfg):
+        if ext not in exts:
+            exts.append(ext)
     return False, exts, include_folders
 
 def is_mod_file(path: Path, cfg: Dict) -> bool:
@@ -80,27 +101,53 @@ def _iter_mod_sources(src_dir: Path, recursive: bool, include_folders: bool):
         elif p.is_file():
             yield p, False
 
+def _is_installed(dest: Path) -> bool:
+    return dest.exists() or dest.is_symlink()
+
+def _mod_file(p: Path, is_dir: bool, dst_dir: Path, link_prefix: str) -> ModFile:
+    dest = dst_dir / (p.name if is_dir else _link_dest_name(p, link_prefix))
+    return ModFile(src=p, dest=dest, is_dir=is_dir)
+
+def _build_mod(members: List[ModFile], group_exts: List[str], copy_install: bool) -> ModItem:
+    """Turn one or more member files into a mod named after its primary member."""
+    if len(members) > 1:
+        members = sorted(members, key=lambda f: (group_exts.index(f.src.suffix.lower()), f.src.name.lower()))
+    primary = members[0]
+    return ModItem(
+        name=primary.src.name,
+        src=primary.src,
+        dest=primary.dest,
+        is_dir=primary.is_dir,
+        installed=all(_is_installed(f.dest) for f in members),
+        files=tuple(members) if len(members) > 1 else (),
+        copy_install=copy_install,
+    )
+
 def discover_mods(cfg: Dict) -> List[ModItem]:
     src_dir = Path(cfg.get("mods_source_dir") or "").expanduser()
     dst_dir = Path(cfg.get("game_mods_dir") or "").expanduser()
     show_all, exts, include_folders = parse_extensions(cfg)
+    group_exts = parse_group_extensions(cfg)
     recursive = bool(cfg.get("mod_recursive_scan"))
     link_prefix = (cfg.get("link_prefix") or "").strip()
+    copy_install = is_copy_install(cfg)
 
-    items: List[ModItem] = []
     if not src_dir.exists():
-        return items
+        return []
 
+    order: List = []
+    groups: Dict = {}
     for p, is_dir in _iter_mod_sources(src_dir, recursive, include_folders):
-        if is_dir:
-            dest = dst_dir / p.name
-            installed = dest.exists() or dest.is_symlink()
-            items.append(ModItem(name=p.name, src=p, dest=dest, is_dir=True, installed=installed))
-        elif show_all or p.suffix.lower() in exts:
-            dest = dst_dir / _link_dest_name(p, link_prefix)
-            installed = dest.exists() or dest.is_symlink()
-            items.append(ModItem(name=p.name, src=p, dest=dest, is_dir=False, installed=installed))
-    return items
+        if not is_dir and not (show_all or p.suffix.lower() in exts):
+            continue
+        key = p
+        if not is_dir and p.suffix.lower() in group_exts:
+            key = (p.parent, p.stem.lower())
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(_mod_file(p, is_dir, dst_dir, link_prefix))
+    return [_build_mod(groups[key], group_exts, copy_install) for key in order]
 
 def list_installed_mods(cfg: Dict) -> List[ModItem]:
     items = discover_mods(cfg)
@@ -110,8 +157,11 @@ def list_broken_links(cfg: Dict) -> List[ModItem]:
     items = discover_mods(cfg)
     return [m for m in items if m.installed and not m.src.exists()]
 
-def apply_mod(mod: ModItem) -> Tuple[bool, str]:
-    return mklink(mod.src, mod.dest)
+def is_copy_install(cfg: Dict) -> bool:
+    return str(cfg.get("install_mode") or "").strip().lower() == "copy"
+
+def apply_mod(mod: ModItem, overwrite: bool = False) -> Tuple[bool, str]:
+    return apply_mods_batch([mod], overwrite)[0]
 
 def import_mod_file(cfg: Dict, src: Path, replace: bool = False) -> Tuple[bool, str]:
     dst_dir = Path(cfg.get("mods_source_dir") or "").expanduser()
@@ -133,7 +183,7 @@ def import_mod_file(cfg: Dict, src: Path, replace: bool = False) -> Tuple[bool, 
 
 def mod_image_path(cfg: Dict, mod_name: str) -> Path | None:
     images_dir = Path(cfg.get("mods_source_dir") or "").expanduser() / "images"
-    for ext in [".png", ".gif", ".jpg", ".jpeg", ".bmp", ".webp", ".ppm", ".pgm"]:
+    for ext in IMAGE_EXTENSIONS:
         candidate = images_dir / f"{mod_name}{ext}"
         if candidate.exists():
             return candidate
@@ -153,15 +203,67 @@ def import_mod_image(cfg: Dict, mod_name: str, src: Path) -> Tuple[bool, str]:
         shutil.copy2(src, dst)
     return True, dst.name
 
-def apply_mods_batch(mods: List[ModItem]) -> List[Tuple[bool, str]]:
+def _pending_files(mod: ModItem, overwrite: bool) -> List[ModFile]:
+    """Members to write: everything when replacing, otherwise only what a half installed group misses."""
+    if overwrite and mod.copy_install:
+        return list(mod.install_files)
+    pending = [f for f in mod.install_files if not _is_installed(f.dest)]
+    return pending or list(mod.install_files)
+
+def _fold_results(results: List[Tuple[bool, str]]) -> Tuple[bool, str]:
+    for ok, msg in results:
+        if not ok:
+            return False, msg
+    return True, "OK"
+
+def _link_files(files: List[ModFile]) -> List[Tuple[bool, str]]:
+    items = [(f.src, f.dest, f.is_dir) for f in files]
+    if not is_windows():
+        return [mklink(src, dest) for src, dest, _is_dir in items]
+    return mklink_batch(items)
+
+def apply_mods_batch(mods: List[ModItem], overwrite: bool = False) -> List[Tuple[bool, str]]:
     if not mods:
         return []
-    if not is_windows():
-        return [apply_mod(m) for m in mods]
-    return mklink_batch([(m.src, m.dest, m.is_dir) for m in mods])
+    work = [(index, f) for index, m in enumerate(mods) for f in _pending_files(m, overwrite)]
+    linked = [(index, f) for index, f in work if not mods[index].copy_install]
+    copied = [(index, f) for index, f in work if mods[index].copy_install]
+
+    per_mod: List[List[Tuple[bool, str]]] = [[] for _ in mods]
+    for items, results in (
+        (linked, _link_files([f for _index, f in linked])),
+        (copied, copy_batch([(f.src, f.dest, f.is_dir) for _index, f in copied], overwrite)),
+    ):
+        for (index, _f), result in zip(items, results):
+            per_mod[index].append(result)
+    return [_fold_results(results) for results in per_mod]
+
+OVERWRITE_PREVIEW_COUNT = 10
+OVERWRITE_MESSAGE = "{count} file(s) already exist in the game mods folder:\n\n{names}"
+
+def existing_targets(mods: List[ModItem]) -> List[str]:
+    """Names in the game mods folder that a copy install would overwrite."""
+    return [
+        f.dest.name
+        for m in mods
+        if m.copy_install
+        for f in m.install_files
+        if _is_installed(f.dest)
+    ]
+
+def overwrite_message(names: List[str]) -> str:
+    """Shared wording for the overwrite warning in every interface."""
+    listed = "\n".join(names[:OVERWRITE_PREVIEW_COUNT])
+    if len(names) > OVERWRITE_PREVIEW_COUNT:
+        listed += f"\n... and {len(names) - OVERWRITE_PREVIEW_COUNT} more"
+    return OVERWRITE_MESSAGE.format(count=len(names), names=listed)
 
 def deactivate_mod(mod: ModItem) -> Tuple[bool, str]:
-    return unlink_path(mod.dest)
+    remove = remove_path if mod.copy_install else unlink_path
+    results = [remove(f.dest) for f in mod.install_files if _is_installed(f.dest)]
+    if not results:
+        return False, "Already removed"
+    return _fold_results(results)
 
 def mods_view(
     cfg: Dict,
@@ -263,6 +365,7 @@ def apply_mods_page(
     search_query: str,
     order_mode: str,
     favorite_only: bool = False,
+    overwrite: bool = False,
 ) -> Tuple[int, int, int]:
     _items, shown, target_page, _pages, _labels = mods_view(
         cfg, page, label_filter, search_query, order_mode, favorite_only
@@ -272,7 +375,7 @@ def apply_mods_page(
     err = 0
     for idx, m in enumerate(to_install, start=1):
         print(f"[{idx}/{total}] Installing {m.name} ...")
-    results = apply_mods_batch(to_install)
+    results = apply_mods_batch(to_install, overwrite)
     installed_names = []
     for _m, (ok, msg) in zip(to_install, results):
         if not ok:
@@ -284,26 +387,27 @@ def apply_mods_page(
         mark_mods_managed(installed_names, "installed")
     return target_page, total, err
 
-def toggle_mods_by_indexes(shown: List[ModItem], indexes: List[int]) -> str:
+def mods_by_indexes(shown: List[ModItem], indexes: List[int]) -> List[ModItem]:
+    return [shown[num - 1] for num in indexes if 1 <= num <= len(shown)]
+
+def toggle_mods_by_indexes(shown: List[ModItem], indexes: List[int], overwrite: bool = False) -> str:
     to_install: List[ModItem] = []
     uninstalled_names = []
     uninstalled = 0
     uninstall_errors = 0
-    for num in indexes:
-        if 1 <= num <= len(shown):
-            m = shown[num - 1]
-            if m.installed:
-                ok, msg = deactivate_mod(m)
-                if ok:
-                    uninstalled += 1
-                    uninstalled_names.append(m.name)
-                else:
-                    uninstall_errors += 1
+    for m in mods_by_indexes(shown, indexes):
+        if m.installed:
+            ok, msg = deactivate_mod(m)
+            if ok:
+                uninstalled += 1
+                uninstalled_names.append(m.name)
             else:
-                to_install.append(m)
+                uninstall_errors += 1
+        else:
+            to_install.append(m)
     install_errors = 0
     if to_install:
-        results = apply_mods_batch(to_install)
+        results = apply_mods_batch(to_install, overwrite)
         install_errors = sum(1 for ok, _msg in results if not ok)
         mark_mods_managed([m.name for m, (ok, _msg) in zip(to_install, results) if ok], "installed")
     if uninstalled_names:

@@ -71,7 +71,7 @@ class CliRequestTests(unittest.TestCase):
             )
 
         self.assertEqual(code, 1)
-        apply_mods_page.assert_called_once_with(self.cfg, 2, "combat", "pak", "created_date")
+        apply_mods_page.assert_called_once_with(self.cfg, 2, "combat", "pak", "created_date", False, False)
         self.assertIn("Installed 2/3 on page 2. Errors: 1.", output)
 
     def test_mods_search_command_uses_text_as_search_filter(self):
@@ -134,7 +134,7 @@ class CliRequestTests(unittest.TestCase):
             code, output = self.run_request(["mods", "toggle", "1,3", "--page", "2", "--search", "pak"])
 
         self.assertEqual(code, 0)
-        toggle_mods.assert_called_once_with(shown, [1, 3])
+        toggle_mods.assert_called_once_with(shown, [1, 3], False)
         self.assertIn("Installed 2/2. Errors: 0.", output)
 
     def test_mods_uninstall_request_passes_view_options(self):
@@ -225,6 +225,43 @@ class CliRequestTests(unittest.TestCase):
         add_favorites.assert_called_once_with(self.cfg, ["favorite.pak"])
         self.assertIn("Favorites added: favorite.pak", output)
 
+    def test_a_copy_profile_refuses_to_replace_existing_files_without_the_flag(self):
+        self.cfg["install_mode"] = "copy"
+        taken = self.mod_item("weapon.pak")
+        taken.copy_install = True
+
+        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
+            "mod_manager.cli.mods_view", return_value=([taken], [taken], 1, 1, {})
+        ), patch("mod_manager.cli.existing_targets", return_value=["weapon.pak"]), patch(
+            "mod_manager.cli.apply_mods_page"
+        ) as apply_mods:
+            code, output = self.run_request(["mods", "install"])
+
+        self.assertEqual(code, 1)
+        apply_mods.assert_not_called()
+        self.assertIn("1 file(s) already exist", output)
+        self.assertIn("--overwrite", output)
+
+    def test_the_overwrite_flag_reaches_the_page_operation(self):
+        self.cfg["install_mode"] = "copy"
+
+        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
+            "mod_manager.cli.apply_mods_page", return_value=(1, 1, 0)
+        ) as apply_mods:
+            code, _output = self.run_request(["mods", "install", "--overwrite"])
+
+        self.assertEqual(code, 0)
+        apply_mods.assert_called_once_with(self.cfg, 1, "", "", "default", False, True)
+
+    def test_a_link_profile_installs_without_checking_for_existing_files(self):
+        with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
+            "mod_manager.cli.existing_targets"
+        ) as existing, patch("mod_manager.cli.apply_mods_page", return_value=(1, 1, 0)):
+            code, _output = self.run_request(["mods", "install"])
+
+        self.assertEqual(code, 0)
+        existing.assert_not_called()
+
     def test_install_favorite_filter_reaches_page_operation(self):
         with patch("mod_manager.cli.ensure_paths", return_value=True), patch(
             "mod_manager.cli.apply_mods_page", return_value=(1, 1, 0)
@@ -232,7 +269,7 @@ class CliRequestTests(unittest.TestCase):
             code, _output = self.run_request(["mods", "install", "--favorite"])
 
         self.assertEqual(code, 0)
-        apply_mods.assert_called_once_with(self.cfg, 1, "", "", "default", True)
+        apply_mods.assert_called_once_with(self.cfg, 1, "", "", "default", True, False)
 
     def test_settings_set_request_saves_changed_values(self):
         saved = Mock()
@@ -339,7 +376,7 @@ class CliRequestTests(unittest.TestCase):
             code, output = self.run_request(["presets", "toggle", "2,4", "--page", "3"])
 
         self.assertEqual(code, 1)
-        toggle_presets.assert_called_once_with(self.cfg, 3, [2, 4], set())
+        toggle_presets.assert_called_once_with(self.cfg, 3, [2, 4], set(), False)
         self.assertIn("Installed: 1, Errors: 1", output)
         self.assertIn(" -  missing.pak: ERR", output)
 

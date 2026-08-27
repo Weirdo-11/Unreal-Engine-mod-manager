@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 APP_NAME = "Mod Manager"
-APP_VERSION = "1.2.5"
+APP_VERSION = "1.2.6"
 
 if getattr(sys, "frozen", False):
     APP_DIR = Path(sys.executable).resolve().parent
@@ -29,8 +29,10 @@ DEFAULT_CONFIG = {
     "mods_source_dir": "",
     "game_mods_dir": "",
     "mod_extensions": "",
+    "mod_group_extensions": "",
     "mod_recursive_scan": False,
     "link_prefix": "",
+    "install_mode": "link",
     "page_size": 10,
     "max_mod_name_len": 28,
     "max_preset_name_len": 28,

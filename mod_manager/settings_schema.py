@@ -73,6 +73,12 @@ MODS_FIELDS = (
         kind=TEXT,
     ),
     FieldSpec(
+        key="mod_group_extensions",
+        label="Grouped extensions",
+        tooltip="Comma separated extensions joined into a single mod when the files share a name, for example .pak,.utoc,.ucas. Installing or uninstalling then applies to every file of the group.",
+        kind=TEXT,
+    ),
+    FieldSpec(
         key="mod_recursive_scan",
         label="Scan subfolders",
         tooltip="Also look inside subfolders of the mods source folder when listing available mods.",
@@ -83,6 +89,13 @@ MODS_FIELDS = (
         label="Link name prefix",
         tooltip="Text added to the start of created link names in the game mods folder. Applies to linked files only, not to folders.",
         kind=TEXT,
+    ),
+    FieldSpec(
+        key="install_mode",
+        label="Install method",
+        tooltip="Link creates a symlink or junction in the game mods folder. Copy physically copies the mod files there for games that cannot load linked files.",
+        kind=CHOICE,
+        choices=("link", "copy"),
     ),
 )
 

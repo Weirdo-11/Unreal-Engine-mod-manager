@@ -66,6 +66,15 @@ class SchemaShapeTest(unittest.TestCase):
     def test_ui_scale_percent_has_a_default(self):
         self.assertEqual(DEFAULT_CONFIG["ui_scale_percent"], 100)
 
+    def test_a_new_profile_links_instead_of_copying_and_groups_nothing(self):
+        self.assertEqual(DEFAULT_CONFIG["install_mode"], "link")
+        self.assertEqual(DEFAULT_CONFIG["mod_group_extensions"], "")
+        self.assertEqual(schema.spec_for("install_mode").choices, ("link", "copy"))
+
+    def test_the_install_method_and_grouping_are_per_game_settings(self):
+        for key in ("install_mode", "mod_group_extensions"):
+            self.assertIn(key, schema.PROFILE_KEYS, key)
+
     def test_label_for_falls_back_for_unknown_keys(self):
         self.assertEqual(schema.label_for("page_size"), "Mods per page")
         self.assertEqual(schema.label_for("mod_recursive_scan"), "Scan subfolders")

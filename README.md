@@ -1,6 +1,6 @@
 # Mod Manager
 
-A symlink-based mod manager for Unreal Engine games. Manages mods as symbolic links (files) and junctions (folders) in the game directory — no file copying.
+A symlink-based mod manager for Unreal Engine games. Manages mods as symbolic links (files) and junctions (folders) in the game directory — no file copying. Games that cannot load linked files can switch a profile to physical copying instead.
 
 ---
 
@@ -138,6 +138,9 @@ Action buttons are never placed in a flat row. Each group is declared in `mod_ma
 ---
 
 - Install / uninstall mods via symlinks — no file duplication
+- Per game profile install method: links, or physical file copies for games that reject linked files
+- Overwrite confirmation before a copy install replaces files already in the game folder
+- Group several file types into one mod, for example `.pak` + `.utoc` + `.ucas` sharing a name; the detail panel lists every file of the group
 - Game profiles with separate game folders, source folders, presets, labels, and active default selection
 - Presets — save and restore named mod sets
 - Labels — tag and filter mods by category
@@ -216,13 +219,22 @@ All commands follow the pattern: `python mod-manager.py <command> <subcommand> [
 --game-mods-dir <path>
 --mods-source-dir <path>
 --mod-extensions <exts>                       Comma-separated, e.g. .pak,.rar,.utoc
+--mod-group-extensions <exts>                 Comma-separated, e.g. .pak,.utoc,.ucas
 --mod-recursive-scan / --no-mod-recursive-scan  Scan subfolders of the source directory
 --link-prefix <text>
+--install-mode link|copy                      How mods reach the game folder
 ```
+
+These flags are generated from `mod_manager/settings_schema.py`, so `games add --help` prints the same
+description that the GUI shows as a tooltip on the matching Game profile field.
 
 `--mod-extensions` accepts any number of comma-separated extensions (e.g. `.pak,.utoc,.ucas`). Add the special `folders` token (e.g. `.pak,folders`) to also treat subfolders of the source directory as mod units. If `--mod-extensions` is empty (the default), every file and folder is shown — this matches the previous behavior. If `--mod-extensions` is set without `folders`, subfolders are no longer treated as mods unless `folders` is included.
 
 `--mod-recursive-scan` makes the manager search subfolders for matching files at any depth (folders that themselves qualify as mod units, per `folders` above, are not recursed into). Files found in subfolders are linked into the game folder by their own filename.
+
+`--mod-group-extensions` joins several file types into a single mod. With `.pak,.utoc,.ucas`, the files `Weapon.pak`, `Weapon.utoc` and `Weapon.ucas` become one mod listed as `Weapon.pak` — named after the first extension in the list that is actually present — and installing, uninstalling, or applying a preset covers every member at once. A grouped mod counts as installed only when all of its files are in the game folder; a half-installed group completes on the next install. Grouped extensions are always treated as mod files even when `--mod-extensions` does not list them, and files are only grouped with siblings in the same folder, so a recursive scan never merges two same-named mods from different subfolders.
+
+`--install-mode` selects how mods reach the game folder. `link` (the default) creates symlinks and junctions as before. `copy` physically copies the mod files, for games that refuse to load linked content; uninstalling then deletes those copies from the game folder and never touches your source mods. In copy mode an install that would replace an existing file asks for confirmation first — the GUI shows a dialog listing the affected files, and the CLI prints them and stops unless `--overwrite` is given.
 
 **Examples:**
 
@@ -259,6 +271,7 @@ python mod-manager.py games select <profile-id>
 --search <text>  Filter by name
 --order <mode>   Sort order
 --favorite       Show favorite mods only
+--overwrite      Replace existing files (copy install mode only; `install` and `toggle`)
 ```
 
 Order modes: `default`, `created_date`, `last_managed`, `label`, `name`, `installed`.
@@ -288,7 +301,7 @@ In the GUI, the favorite filter is the star button beside the Label filter. A fi
 | `list` | List saved presets |
 | `page <n>` | Go to page `n` |
 | `save <name>` | Save current installed mods as a preset |
-| `toggle <indexes>` | Apply or remove preset by index |
+| `toggle <indexes>` | Apply or remove preset by index (accepts `--overwrite`) |
 | `delete <indexes>` | Delete presets by index |
 
 **Examples:**
@@ -330,9 +343,9 @@ python mod-manager.py presets delete 2,3
 
 These flags are generated from `mod_manager/settings_schema.py`, so `settings set --help` prints the same description that the GUI shows as a tooltip, and the same validation applies to both.
 
-Game-specific paths and extension settings (`mods_source_dir`, `game_mods_dir`, `mod_extensions`, `mod_recursive_scan`, `link_prefix`) are not application settings. They are edited only through `games add` / `games edit` and the GUI "Game profile" dialog, and a settings update never changes them. `settings show` still prints the values of the active profile.
+Game-specific paths, extension, grouping and install settings (`mods_source_dir`, `game_mods_dir`, `mod_extensions`, `mod_group_extensions`, `mod_recursive_scan`, `link_prefix`, `install_mode`) are not application settings. They are edited only through `games add` / `games edit` and the GUI "Game profile" dialog, and a settings update never changes them. `settings show` still prints the values of the active profile.
 
-In the GUI, the "Game profile" dialog (Games > Add/Edit) shows a "Scan subfolders" checkbox next to the mod file extensions field — see the `games` command reference above for details on the `folders` token and recursive scanning.
+In the GUI, the "Game profile" dialog (Games > Add/Edit) shows every per-game field, including "Grouped extensions", a "Scan subfolders" checkbox and the "Install method" selector — see the `games` command reference above for details on the `folders` token, recursive scanning, grouping and the copy install mode.
 
 #### Settings labels and tooltips
 
